@@ -1,13 +1,17 @@
 # deno
 
-[![Build Status](https://travis-ci.com/ry/deno.svg?branch=master)](https://travis-ci.com/ry/deno)
+| **Linux & Mac** | **Windows** |
+|:---------------:|:-----------:|
+| [![Travis](https://travis-ci.com/denoland/deno.svg?branch=master)](https://travis-ci.com/denoland/deno) | [![Appveyor](https://ci.appveyor.com/api/projects/status/yel7wtcqwoy0to8x?branch=master&svg=true)](https://ci.appveyor.com/project/deno/deno) |
 
-A secure TypeScript runtime on V8
 
-* Supports TypeScript 2.8 out of the box. Uses V8 6.8.275.3. That is, it's
+
+## A secure TypeScript runtime built on V8
+
+* Supports TypeScript 3.0.1 out of the box. Uses V8 6.9.297. That is, it's
   very modern JavaScript.
 
-* No package.json, no npm. Not explicitly compatible with Node.
+* No `package.json`. No npm. Not explicitly compatible with Node.
 
 * Imports reference source code URLs only.
 	```
@@ -15,129 +19,113 @@ A secure TypeScript runtime on V8
   import { log } from "./util.ts"
 	```
   Remote code is fetched and cached on first execution, and never updated until
-  the code is run with the `--reload` flag. (So this will still work on an
+  the code is run with the `--reload` flag. (So, this will still work on an
   airplane. See `~/.deno/src` for details on the cache.)
 
 * File system and network access can be controlled in order to run sandboxed
   code. Defaults to read-only file system access and no network access.
-	Access between V8 (unprivileged) and Golang (privileged) is only done via
+	Access between V8 (unprivileged) and Rust (privileged) is only done via
   serialized messages defined in this
-  [protobuf](https://github.com/ry/deno/blob/master/msg.proto), this makes it
+  [flatbuffer](https://github.com/denoland/deno/blob/master/src/msg.fbs). This makes it
   easy to audit.
 	To enable write access explicitly use `--allow-write` and `--allow-net` for
   network access.
 
 * Single executable:
 	```
-	> ls -lh deno
-	-rwxrwxr-x 1 ryan ryan 55M May 28 23:46 deno
-	> ldd deno
-		linux-vdso.so.1 =>  (0x00007ffc6797a000)
-		libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f104fa47000)
-		libstdc++.so.6 => /usr/lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f104f6c5000)
-		libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f104f3bc000)
-		libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f104f1a6000)
-		libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f104eddc000)
-		/lib64/ld-linux-x86-64.so.2 (0x00007f104fc64000)
+  > ls -lh out/release/deno
+  -rwxr-xr-x  1 rld  staff    48M Aug  2 13:24 out/release/deno
+  > otool -L out/release/deno
+  out/release/deno:
+    /usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1252.50.4)
+    /usr/lib/libresolv.9.dylib (compatibility version 1.0.0, current version 1.0.0)
+    /System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 58286.51.6)
+    /usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 400.9.0)
+  >
 	```
 
 * Always dies on uncaught errors.
 
-* Supports top-level await.
+* Supports top-level `await`.
 
 * Aims to be browser compatible.
 
-* Can be used as a library to easily build your own JavaScript runtime.
-	https://github.com/ry/deno/blob/master/cmd/main.go
+## Install
+
+```
+curl -sSf https://raw.githubusercontent.com/denoland/deno_install/master/install.py | python
+```
 
 
 ## Status
 
-Segfaulty.
+Under development.
 
-No docs yet. For some of the public API see: [deno.d.ts](https://github.com/ry/deno/blob/master/deno.d.ts).
+We make binary releases [here](https://github.com/denoland/deno/releases).
 
-And examples are around here: [testdata/004_set_timeout.ts](https://github.com/ry/deno/blob/master/testdata/004_set_timeout.ts).
+Progress towards future releases is tracked
+[here](https://github.com/denoland/deno/milestones).
 
-Roadmap is [here](https://github.com/ry/deno/blob/master/TODO.txt).
+Roadmap is [here](https://github.com/denoland/deno/blob/master/Roadmap.md).
+Also see [this presentation](http://tinyclouds.org/jsconf2018.pdf).
 
-Also see this preentation http://tinyclouds.org/jsconf2018.pdf
+[Chat room](https://gitter.im/denolife/Lobby).
 
 
-## Compile instructions
+## Build instructions
 
-I will release binaries at some point but for now you have to build it
-yourself.
+To ensure reproducible builds, Deno has most of its dependencies in a git
+submodule. However, you need to install separately:
 
-You will need [Go](https://golang.org/) with `$GOPATH` defined and
-`$GOPATH/bin` in your `$PATH`.  You will also need
-[yarn](https://yarnpkg.com/lang/en/docs/install/) installed.
+1. [Rust](https://www.rust-lang.org/en-US/install.html)
+2. [Node](http://nodejs.org/)
+3. Python 2. [Not 3](https://github.com/denoland/deno/issues/464#issuecomment-411795578).
+4. [ccache](https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Build_Instructions/ccache) (Optional but helpful for speeding up rebuilds of V8.)
+.
 
-You need Protobuf 3. On Linux this might work:
+To build:
 
-``` bash
-cd ~
-wget https://github.com/google/protobuf/releases/download/v3.1.0/protoc-3.1.0-linux-x86_64.zip
-unzip protoc-3.1.0-linux-x86_64.zip
-export PATH=$HOME/bin:$PATH
-```
+    # Fetch deps.
+    git clone --recurse-submodules https://github.com/denoland/deno.git
+    cd deno
+    ./tools/setup.py
 
-On macOS, using [HomeBrew](https://brew.sh/):
+    # Build.
+    ./tools/build.py
 
-``` bash
-brew install protobuf
-```
+    # Run.
+    ./out/debug/deno tests/002_hello.ts
 
-Then you need [protoc-gen-go](https://github.com/golang/protobuf/tree/master/protoc-gen-go) and [go-bindata](https://github.com/jteeuwen/go-bindata):
+    # Test.
+    ./tools/test.py
 
-``` bash
-go get -u github.com/golang/protobuf/protoc-gen-go
-go get -u github.com/jteeuwen/go-bindata/...
-```
+    # Format code.
+    ./tools/format.py
 
-You need to get and build [v8worker2](https://github.com/ry/v8worker2).  __The package will not build with `go
-get` and will log out an error ⚠__
-```bash
-# pkg-config --cflags v8.pc
-Failed to open 'v8.pc': No such file or directory
-No package 'v8.pc' found
-pkg-config: exit status 1
-```
+Other useful commands:
 
-__which can be ignored__. It takes about 30 minutes to build:
+    # Call ninja manually.
+    ./third_party/depot_tools/ninja -C out/debug
+    # Build a release binary.
+    DENO_BUILD_MODE=release ./tools/build.py :deno
+    # List executable targets.
+    ./third_party/depot_tools/gn ls out/debug //:* --as=output --type=executable
+    # List build configuation.
+    ./third_party/depot_tools/gn args out/debug/ --list
+    # Edit build configuration.
+    ./third_party/depot_tools/gn args out/debug/
+    # Describe a target.
+    ./third_party/depot_tools/gn desc out/debug/ :deno
+    ./third_party/depot_tools/gn help
 
-``` bash
-go get -u github.com/ry/v8worker2
-cd $GOPATH/src/github.com/ry/v8worker2
-./build.py --use_ccache
-```
-Maybe also run `git submodule update --init` in the v8worker2 dir.
+Env vars: `DENO_BUILD_MODE`, `DENO_BUILD_PATH`, `DENO_BUILD_ARGS`.
 
-Finally you can get `deno` and its other Go deps.
+## Contributing
 
-``` bash
-go get -u github.com/ry/deno/...
-```
-
-Now you can build deno and run it:
-
-``` bash
-cd $GOPATH/src/github.com/ry/deno
-
-make # Wait for redacted
-
-./deno testdata/001_hello.js # Output: Hello World
-```
-
-## make commands
-
-``` bash
-make deno # Builds the deno executable.
-
-make test # Runs the tests.
-
-make fmt # Formats the code.
-
-make clean # Cleans the build.
-```
-
+1. Fork [this repository](https://github.com/denoland/deno) and create your branch from `master`.
+2. Make your change.
+3. Ensure `./tools/test.py` passes.
+4. Format your code with `./tools/format.py`.
+5. Make sure `./tools/lint.py` passes.
+6. Send a pull request.
+7. Sign the [CLA](https://cla-assistant.io/denoland/deno), if you haven't already.

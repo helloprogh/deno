@@ -63,5 +63,6 @@
       "allow-leading-underscore",
       "allow-trailing-underscore"
     ]
-  }
+  },
+  "extends": ["tslint-no-circular-imports"]
 }

@@ -1,0 +1,219 @@
+union Any {
+  Start,
+  StartRes,
+  CodeFetch,
+  CodeFetchRes,
+  CodeCache,
+  Exit,
+  TimerStart,
+  TimerReady,
+  TimerClear,
+  Environ,
+  EnvironRes,
+  FetchReq,
+  FetchRes,
+  MakeTempDir,
+  MakeTempDirRes,
+  Mkdir,
+  Remove,
+  ReadFile,
+  ReadFileRes,
+  WriteFile,
+  Rename,
+  Stat,
+  StatRes,
+  SetEnv,
+}
+
+enum ErrorKind: byte {
+  NoError = 0,
+
+  // io errors
+
+  NotFound,
+  PermissionDenied,
+  ConnectionRefused,
+  ConnectionReset,
+  ConnectionAborted,
+  NotConnected,
+  AddrInUse,
+  AddrNotAvailable,
+  BrokenPipe,
+  AlreadyExists,
+  WouldBlock,
+  InvalidInput,
+  InvalidData,
+  TimedOut,
+  Interrupted,
+  WriteZero,
+  Other,
+  UnexpectedEof,
+
+  // url errors
+
+  EmptyHost,
+  IdnaError,
+  InvalidPort,
+  InvalidIpv4Address,
+  InvalidIpv6Address,
+  InvalidDomainCharacter,
+  RelativeUrlWithoutBase,
+  RelativeUrlWithCannotBeABaseBase,
+  SetHostOnCannotBeABaseUrl,
+  Overflow,
+
+  // hyper errors
+
+  HttpUser,
+  HttpClosed,
+  HttpCanceled,
+  HttpParse,
+  HttpOther,
+}
+
+table Base {
+  cmd_id: uint32;
+  sync: bool = true; // TODO(ry) Change default to false.
+  error_kind: ErrorKind = NoError;
+  error: string;
+  msg: Any;
+}
+
+table Start {
+  unused: int8;
+}
+
+table StartRes {
+  cwd: string;
+  argv: [string];
+  debug_flag: bool;
+  deps_flag: bool;
+}
+
+table CodeFetch {
+  module_specifier: string;
+  containing_file: string;
+}
+
+table CodeFetchRes {
+  // If it's a non-http module, moduleName and filename will be the same.
+  // For http modules, moduleName is its resolved http URL, and filename
+  // is the location of the locally downloaded source code.
+  module_name: string;
+  filename: string;
+  source_code: string;
+  output_code: string; // Non-empty only if cached.
+}
+
+table CodeCache {
+  filename: string;
+  source_code: string;
+  output_code: string;
+}
+
+table Exit {
+  code: int;
+}
+
+table TimerStart {
+  id: uint;
+  delay: uint;
+}
+
+table TimerReady {
+  id: uint;
+  canceled: bool;
+}
+
+table TimerClear {
+  id: uint;
+}
+
+table Environ {}
+
+table SetEnv {
+  key: string;
+  value: string;
+}
+
+table EnvironRes {
+  map: [EnvPair];
+}
+
+table EnvPair {
+  key: string;
+  value: string;
+}
+
+table FetchReq {
+  id: uint;
+  url: string;
+  // header_line: [string];
+}
+
+table FetchRes {
+  id: uint;
+  status: int;
+  header_key: [string];
+  header_value: [string];
+  body: [ubyte];
+}
+
+table MakeTempDir {
+  dir: string;
+  prefix: string;
+  suffix: string;
+}
+
+table MakeTempDirRes {
+  path: string;
+}
+
+table Mkdir {
+  path: string;
+  mode: uint;
+  // mode specified by https://godoc.org/os#FileMode
+}
+
+table Remove {
+  path: string;
+  recursive: bool;
+}
+
+table ReadFile {
+  filename: string;
+}
+
+table ReadFileRes {
+  data: [ubyte];
+}
+
+table WriteFile {
+  filename: string;
+  data: [ubyte];
+  perm: uint;
+  // perm specified by https://godoc.org/os#FileMode
+}
+
+table Rename {
+  oldpath: string;
+  newpath: string;
+}
+
+table Stat {
+  filename: string;
+  lstat: bool;
+}
+
+table StatRes {
+  is_file: bool;
+  is_symlink: bool;
+  len: ulong;
+  modified:ulong;
+  accessed:ulong;
+  created:ulong;
+  mode: int = -1;
+  // negative mode for invalid (Windows); default to invalid
+}
+
+root_type Base;
