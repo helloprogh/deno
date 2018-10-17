@@ -2,7 +2,7 @@ version: '{build}.{branch}'
 
 skip_branch_with_pr: true
 
-clone_folder: c:\deno
+clone_folder: C:\deno
 clone_depth: 1
 
 environment:
@@ -13,6 +13,7 @@ environment:
   MTIME_CACHE_DB: $(APPVEYOR_BUILD_FOLDER)\mtime_cache.xml
   CARGO_HOME: $(USERPROFILE)\.cargo
   RUSTUP_HOME: $(USERPROFILE)\.rustup
+  RUST_BACKTRACE: 1
   RELEASE_ARTIFACT: deno_win_x64.zip
 
   # Appveyor uses 7zip to pack cache directories. We use these options:
@@ -282,8 +283,8 @@ install:
       # Add binary dir for `pip --user` packages.
       $p += "$env:APPDATA\Python\Scripts"
       # Add python27-x64.
-      $p += "c:\Python27-x64"
-      $p += "c:\Python27-x64\Scripts"
+      $p += "C:\Python27-x64"
+      $p += "C:\Python27-x64\Scripts"
       $env:PATH = $p -join ";"
 
   # Pip on Appveyor is too old. Install a recent version in our user dir.
@@ -366,6 +367,10 @@ test_script:
   - ps: Exec { & python tools\test.py $env:DENO_BUILD_PATH }
 
 after_test:
+  # Delete the the rollup cache, which is unreliable, so that it doesn't get
+  # persisted in the appveyor cache.
+  - ps: if (Get-SaveCache) { Delete-Tree "$env:DENO_BUILD_PATH\.rpt2_cache" }
+
   # Remove stale files and empty dirs from the build directory.
   - ps: Stop-TraceFilesNeeded
 

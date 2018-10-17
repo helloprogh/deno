@@ -1,25 +1,37 @@
-import * as fbs from "gen/msg_generated";
+import { Base, ErrorKind } from "gen/msg_generated";
 export { ErrorKind } from "gen/msg_generated";
 
-// @internal
-export class DenoError<T extends fbs.ErrorKind> extends Error {
+/** A Deno specific error.  The `kind` property is set to a specific error code
+ * which can be used to in application logic.
+ *
+ *     import { DenoError, ErrorKind } from "deno";
+ *     try {
+ *       somethingThatMightThrow();
+ *     } catch (e) {
+ *       if (e instanceof DenoError && e.kind === DenoError.Overflow) {
+ *         console.error("Overflow error!");
+ *       }
+ *     }
+ */
+export class DenoError<T extends ErrorKind> extends Error {
   constructor(readonly kind: T, msg: string) {
     super(msg);
-    this.name = fbs.ErrorKind[kind];
+    this.name = ErrorKind[kind];
   }
 }
 
 // @internal
-export function maybeThrowError(base: fbs.Base): void {
+export function maybeThrowError(base: Base): void {
   const err = maybeError(base);
   if (err != null) {
     throw err;
   }
 }
 
-export function maybeError(base: fbs.Base): null | DenoError<fbs.ErrorKind> {
+// @internal
+export function maybeError(base: Base): null | DenoError<ErrorKind> {
   const kind = base.errorKind();
-  if (kind === fbs.ErrorKind.NoError) {
+  if (kind === ErrorKind.NoError) {
     return null;
   } else {
     return new DenoError(kind, base.error()!);

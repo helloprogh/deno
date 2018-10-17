@@ -1,16 +1,15 @@
 // Copyright 2018 the Deno authors. All rights reserved. MIT license.
-import * as fbs from "gen/msg_generated";
+import * as msg from "gen/msg_generated";
 import { flatbuffers } from "flatbuffers";
 import * as dispatch from "./dispatch";
 
-/**
- * Write a new file, with given filename and data synchronously.
+/** Write a new file, with given filename and data synchronously.
  *
- *     import { writeFileSync } from "deno";
+ *       import { writeFileSync } from "deno";
  *
- *     const encoder = new TextEncoder("utf-8");
- *     const data = encoder.encode("Hello world\n");
- *     writeFileSync("hello.txt", data);
+ *       const encoder = new TextEncoder("utf-8");
+ *       const data = encoder.encode("Hello world\n");
+ *       writeFileSync("hello.txt", data);
  */
 export function writeFileSync(
   filename: string,
@@ -20,14 +19,13 @@ export function writeFileSync(
   dispatch.sendSync(...req(filename, data, perm));
 }
 
-/**
- * Write a new file, with given filename and data.
+/** Write a new file, with given filename and data.
  *
- *     import { writeFile } from "deno";
+ *       import { writeFile } from "deno";
  *
- *     const encoder = new TextEncoder("utf-8");
- *     const data = encoder.encode("Hello world\n");
- *     await writeFile("hello.txt", data);
+ *       const encoder = new TextEncoder("utf-8");
+ *       const data = encoder.encode("Hello world\n");
+ *       await writeFile("hello.txt", data);
  */
 export async function writeFile(
   filename: string,
@@ -41,14 +39,12 @@ function req(
   filename: string,
   data: Uint8Array,
   perm: number
-): [flatbuffers.Builder, fbs.Any, flatbuffers.Offset] {
+): [flatbuffers.Builder, msg.Any, flatbuffers.Offset, Uint8Array] {
   const builder = new flatbuffers.Builder();
   const filename_ = builder.createString(filename);
-  const dataOffset = fbs.WriteFile.createDataVector(builder, data);
-  fbs.WriteFile.startWriteFile(builder);
-  fbs.WriteFile.addFilename(builder, filename_);
-  fbs.WriteFile.addData(builder, dataOffset);
-  fbs.WriteFile.addPerm(builder, perm);
-  const msg = fbs.WriteFile.endWriteFile(builder);
-  return [builder, fbs.Any.WriteFile, msg];
+  msg.WriteFile.startWriteFile(builder);
+  msg.WriteFile.addFilename(builder, filename_);
+  msg.WriteFile.addPerm(builder, perm);
+  const inner = msg.WriteFile.endWriteFile(builder);
+  return [builder, msg.Any.WriteFile, inner, data];
 }

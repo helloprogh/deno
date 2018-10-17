@@ -39,6 +39,26 @@ def run_output(args, quiet=False, cwd=None, env=None, merge_env={}):
     return subprocess.check_output(args, cwd=cwd, env=env, shell=shell)
 
 
+def shell_quote_win(arg):
+    if re.search(r'[\x00-\x20"^%~!@&?*<>|()=]', arg):
+        # Double all " quote characters.
+        arg = arg.replace('"', '""')
+        # Wrap the entire string in " quotes.
+        arg = '"' + arg + '"'
+        # Double any N backslashes that are immediately followed by a " quote.
+        arg = re.sub(r'(\\+)(?=")', r'\1\1', arg)
+    return arg
+
+
+def shell_quote(arg):
+    if os.name == "nt":
+        return shell_quote_win(arg)
+    else:
+        # Python 2 has posix shell quoting built in, albeit in a weird place.
+        from pipes import quote
+        return quote(arg)
+
+
 def remove_and_symlink(target, name, target_is_dir=False):
     try:
         # On Windows, directory symlink can only be removed with rmdir().
@@ -173,3 +193,142 @@ def parse_exit_code(s):
         return codes[0]
     else:
         return 0
+
+
+# Attempts to enable ANSI escape code support.
+# Returns True if successful, False if not supported.
+def enable_ansi_colors():
+    if os.name != 'nt':
+        return True  # On non-windows platforms this just works.
+    elif "CI" in os.environ:
+        return True  # Ansi escape codes work out of the box on Appveyor.
+
+    return enable_ansi_colors_win10()
+
+
+# The windows 10 implementation of enable_ansi_colors.
+def enable_ansi_colors_win10():
+    import ctypes
+
+    # Function factory for errcheck callbacks that raise WinError on failure.
+    def raise_if(error_result):
+        def check(result, func, args):
+            if result == error_result:
+                raise ctypes.WinError(ctypes.get_last_error())
+            return args
+
+        return check
+
+    # Windows API types.
+    from ctypes.wintypes import BOOL, DWORD, HANDLE, LPCWSTR, LPVOID
+    LPDWORD = ctypes.POINTER(DWORD)
+
+    # Generic constants.
+    NULL = ctypes.c_void_p(0).value
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+    ERROR_INVALID_PARAMETER = 87
+
+    # CreateFile flags.
+    # yapf: disable
+    GENERIC_READ  = 0x80000000
+    GENERIC_WRITE = 0x40000000
+    FILE_SHARE_READ  = 0x01
+    FILE_SHARE_WRITE = 0x02
+    OPEN_EXISTING = 3
+    # yapf: enable
+
+    # Get/SetConsoleMode flags.
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x04
+
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+
+    # HANDLE CreateFileW(...)
+    CreateFileW = kernel32.CreateFileW
+    CreateFileW.restype = HANDLE
+    CreateFileW.errcheck = raise_if(INVALID_HANDLE_VALUE)
+    # yapf: disable
+    CreateFileW.argtypes = (LPCWSTR,  # lpFileName
+                            DWORD,    # dwDesiredAccess
+                            DWORD,    # dwShareMode
+                            LPVOID,   # lpSecurityAttributes
+                            DWORD,    # dwCreationDisposition
+                            DWORD,    # dwFlagsAndAttributes
+                            HANDLE)   # hTemplateFile
+    # yapf: enable
+
+    # BOOL CloseHandle(HANDLE hObject)
+    CloseHandle = kernel32.CloseHandle
+    CloseHandle.restype = BOOL
+    CloseHandle.errcheck = raise_if(False)
+    CloseHandle.argtypes = (HANDLE, )
+
+    # BOOL GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode)
+    GetConsoleMode = kernel32.GetConsoleMode
+    GetConsoleMode.restype = BOOL
+    GetConsoleMode.errcheck = raise_if(False)
+    GetConsoleMode.argtypes = (HANDLE, LPDWORD)
+
+    # BOOL SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode)
+    SetConsoleMode = kernel32.SetConsoleMode
+    SetConsoleMode.restype = BOOL
+    SetConsoleMode.errcheck = raise_if(False)
+    SetConsoleMode.argtypes = (HANDLE, DWORD)
+
+    # Open the console output device.
+    conout = CreateFileW("CONOUT$", GENERIC_READ | GENERIC_WRITE,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                         OPEN_EXISTING, 0, 0)
+
+    # Get the current mode.
+    mode = DWORD()
+    GetConsoleMode(conout, ctypes.byref(mode))
+
+    # Try to set the flag that controls ANSI escape code support.
+    try:
+        SetConsoleMode(conout, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+    except WindowsError as e:
+        if e.winerror == ERROR_INVALID_PARAMETER:
+            return False  # Not supported, likely an older version of Windows.
+        raise
+    finally:
+        CloseHandle(conout)
+
+    return True
+
+
+def parse_unit_test_output(output, print_to_stdout):
+    first = True
+    expected = None
+    actual = None
+    result = None
+    for line in iter(output.readline, ''):
+        if expected is None:
+            # expect "running 30 tests"
+            expected = extract_number(r'running (\d+) tests', line)
+        elif "test result:" in line:
+            result = line
+        if print_to_stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+    # Check that the number of expected tests equals what was reported at the
+    # bottom.
+    if result:
+        # result should be a string like this:
+        # "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; ..."
+        actual = extract_number(r'(\d+) passed', result)
+    return (actual, expected)
+
+
+def extract_number(pattern, string):
+    matches = re.findall(pattern, string)
+    if len(matches) != 1:
+        return None
+    return int(matches[0])
+
+
+def parse_wrk_output(output):
+    req_per_sec = None
+    for line in output.split("\n"):
+        if req_per_sec is None:
+            req_per_sec = extract_number(r'Requests/sec:\s+(\d+)', line)
+    return req_per_sec

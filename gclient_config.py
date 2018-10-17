@@ -1,5 +1,5 @@
 solutions = [{
-    'url': 'https://chromium.googlesource.com/v8/v8.git@7.0.247',
+    'url': 'https://chromium.googlesource.com/v8/v8.git@7.0.276.15',
     'name': 'v8',
     'deps_file': 'DEPS',
     'custom_deps': {
@@ -35,7 +35,7 @@ solutions = [{
     'cpplint'
 }, {
     'url':
-    'https://github.com/google/flatbuffers.git@919c929d30f3e344537793794cdae8b204d40f32',
+    'https://github.com/google/flatbuffers.git@d840856093fa7b935b0d6378c436bd633d006c8c',
     'name':
     'flatbuffers'
 }]

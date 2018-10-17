@@ -4,64 +4,68 @@ API and Feature requests should be submitted as PRs to this document.
 
 ## Target Use Cases
 
-### Low-level, fast memory efficient sockets
+### Implementation of `cat`
 
-Example, non-final API for piping a socket to stdout:
+[#721](https://github.com/denoland/deno/issues/721)
 
-```javascript
-function nonblockingpipe(fd) {
-  let buf = new Uint8Array(1024); // Fixed 1k buffer.
-  for (;;) {
-    let code = await deno.pollNB(fd, deno.POLL_RD | deno.POLL_WR);
-    switch (code) {
-    case "READABLE":
-       let [nread, err] = deno.readNB(fd, buf, buf.byteSize);
-       if (err === "EAGAIN") continue;
-       if (err != null) break;
-       await deno.stdout.write(buf.slice(0, nread));
-       break;
-    case "ERROR":
-       throw Error("blah");
-    }
-  }
+```ts
+import * as deno from "deno";
+
+for (let i = 1; i < deno.argv.length; i++) {
+  let filename = deno.argv[i];
+  let file = await deno.open(filename);
+  await deno.copy(deno.stdout, file);
 }
 ```
 
-### List deps
+### TCP Server
+
+[#725](https://github.com/denoland/deno/issues/725)
+
+```ts
+import * as deno from "deno";
+const listener = deno.listen("tcp", ":8080");
+for await (const conn of listener.accept()) {
+  deno.copy(conn, conn);
+}
+```
+
+### List deps (implemented)
 
 ```
-% deno --list-deps http://gist.com/blah.js
+% deno --deps http://gist.com/blah.js
 http://gist.com/blah.js
 http://gist.com/dep.js
 https://github.com/denoland/deno/master/testing.js
 %
 ```
 
-## Security Model
+## Security Model (partially implemented)
 
-* We want to be secure by default; user should be able to run untrusted code,
+- We want to be secure by default; user should be able to run untrusted code,
   like the web.
-* Threat model:
-  * Modifiying/deleting local files
-  * Leaking private information
-* Disallowed default:
-    * Network access
-    * Local write access
-    * Non-JS extensions
-    * Subprocesses
-    * Env access
-* Allowed default:
-    * Local read access.
-    * argv, stdout, stderr, stdin access always allowed.
-    * Maybe: temp dir write access. (But what if they create symlinks there?)
-* The user gets prompted when the software tries to do something it doesn't have
+- Threat model:
+  - Modifiying/deleting local files
+  - Leaking private information
+- Disallowed default:
+  - Network access
+  - Local write access
+  - Non-JS extensions
+  - Subprocesses
+  - Env access
+- Allowed default:
+  - Local read access.
+  - argv, stdout, stderr, stdin access always allowed.
+  - Maybe: temp dir write access. (But what if they create symlinks there?)
+- The user gets prompted when the software tries to do something it doesn't have
   the privilege for.
-* Have an option to get a stack trace when access is requested.
-* Worried that granting access per file will give a false sense of security due
+- Have an option to get a stack trace when access is requested.
+- Worried that granting access per file will give a false sense of security due
   to monkey patching techniques. Access should be granted per program (js
   context).
 
 Example security prompts. Options are: YES, NO, PRINT STACK
+
 ```
 Program requests write access to "~/.ssh/id_rsa". Grant? [yNs]
 http://gist.github.com/asdfasd.js requests network access to "www.facebook.com". Grant? [yNs]
@@ -69,9 +73,9 @@ Program requests access to environment variables. Grant? [yNs]
 Program requests to spawn `rm -rf /`. Grant? [yNs]
 ```
 
-* cli flags to grant access ahead of time --allow-all --allow-write --allow-net
+- cli flags to grant access ahead of time --allow-all --allow-write --allow-net
   --allow-env --allow-exec
-* in version two we will add ability to give finer grain access
+- in version two we will add ability to give finer grain access
   --allow-net=facebook.com
 
 ## Milestone 1: Rust rewrite / V8 snapshot
@@ -86,32 +90,29 @@ libdeno. libdeno will include the entire JS runtime as a V8 snapshot. It still
 follows the message passing paradigm. Rust will be bound to this library to
 implement the privileged part of Deno. See deno2/README.md for more details.
 
-V8 Snapshots allow Deno to avoid recompiling the TypeScript compiler at
-startup. This is already working.
+V8 Snapshots allow Deno to avoid recompiling the TypeScript compiler at startup.
+This is already working.
 
 When the rewrite is at feature parity with the Go prototype, we will release
 binaries for people to try.
 
-
 ## Milestone 2: Scale binding infrastructure
 
-ETA: October 2018
-https://github.com/denoland/deno/milestone/2
+ETA: October 2018 https://github.com/denoland/deno/milestone/2
 
 We decided to use Tokio https://tokio.rs/ to provide asynchronous I/O, thread
 pool execution, and as a base for high level support for various internet
-protocols like HTTP.  Tokio is strongly designed around the idea of Futures -
-which map quite well onto JavaScript promises.  We want to make it as easy as
+protocols like HTTP. Tokio is strongly designed around the idea of Futures -
+which map quite well onto JavaScript promises. We want to make it as easy as
 possible to start a Tokio future from JavaScript and get a Promise for handling
 it. We expect this to result in preliminary file system operations, fetch() for
 http. Additionally we are working on CI, release, and benchmarking
 infrastructure to scale development.
 
-
 ## libdeno C API.
 
-Deno's privileged side will primarily be programmed in Rust. However there
-will be a small C API that wraps V8 to 1) define the low-level message passing
+Deno's privileged side will primarily be programmed in Rust. However there will
+be a small C API that wraps V8 to 1) define the low-level message passing
 semantics 2) provide a low-level test target 3) provide an ANSI C API binding
 interface for Rust. V8 plus this C API is called libdeno and the important bits
 of the API is specified here:
@@ -130,7 +131,7 @@ void deno_set_callback(Deno* deno, deno_sub_cb cb);
 // Get error text with deno_last_exception().
 // 0 = success, non-zero = failure.
 // TODO(ry) Currently the return code has opposite semantics.
-int deno_execute(Deno* d, const char* js_filename, const char* js_source);
+int deno_execute(Deno* d, void* user_data, const char* js_filename, const char* js_source);
 
 // This call doesn't go into JS. This is thread-safe.
 // TODO(ry) Currently this is called deno_pub. It should be renamed.
@@ -145,137 +146,80 @@ const char* deno_last_exception(Deno* d);
 
 ## TypeScript API.
 
+This section will not attempt to over all of the APIs but give a general sense
+of them.
 
-There are three layers of API to consider:
-* L1: the low-level message passing API exported by libdeno (L1),
-* L2: the flatbuffer messages used internally (L2),
-* L3: the final "deno" namespace exported to users (L3).
+### Internal: libdeno
 
-### L1
+This is the lowest-level interface to the privileged side. It provides little
+more than passing ArrayBuffers in and out of the VM. The libdeno API is more or
+less feature complete now. See
+https://github.com/denoland/deno/blob/master/js/libdeno.ts
 
-```typescript
-function send(...ab: ArrayBuffer[]): ArrayBuffer[] | null;
-```
-Used to make calls outside of V8. Send an ArrayBuffer and synchronously receive
-an ArrayBuffer back.
+### Internal: Shared data between Rust and V8
 
-```typescript
-function poll(): ArrayBuffer[];
-```
-Poll for new asynchronous events from the privileged side. This will be done
-as the main event loop.
+We use Flatbuffers to define common structs and enums between TypeScript and
+Rust. These common data structures are defined in
+https://github.com/denoland/deno/blob/master/src/msg.fbs This is more or less
+working.
 
-```typescript
-function print(x: string): void;
-```
-A way to print to stdout. Although this could be easily implemented thru
-`send()` this is an important debugging tool to avoid intermediate
-infrastructure.
+### Public API
 
+This is the global variables and various built-in modules, namely the `"deno"`
+module.
 
-The current implementation is out of sync with this document:
-https://github.com/denoland/deno/blob/master/js/deno.d.ts
+Deno will provide common browser global utilities like `fetch()` and
+`setTimeout()`.
 
-#### L1 Examples
+Deno has typescript built-in. Users can access the built-in typescript using:
 
-The main event loop of Deno should look something like this:
-```js
-function main() {
-   // Setup...
-   while (true) {
-      const messages = deno.poll();
-      processMessages(messages);
-   }
-}
+```ts
+import * as ts from "typescript";
 ```
 
+Deno has its own built-in module which is imported with:
 
-### L2
+```ts
+import * as deno from "deno";
+```
 
-https://github.com/denoland/deno/blob/master/src/msg.fbs
+The rest of this section discusses what will be in the `deno` module.
 
-### L3
-
-With in Deno this is the high-level user facing API. However, the intention
-is to expose functionality as simply as possible. There should be little or
-no "ergonomics" APIs. (For example, `deno.readFileSync` only deals with
-ArrayBuffers and does not have an encoding parameter to return strings.)
-The intention is to make very easy to extend and link in external modules
-which can then add this functionality.
+Within Deno this is the high-level user facing API. However, the intention is to
+expose functionality as simply as possible. There should be little or no
+"ergonomics" APIs. (For example, `deno.readFileSync` only deals with
+ArrayBuffers and does not have an encoding parameter to return strings.) The
+intention is to make very easy to extend and link in external modules which can
+then add this functionality.
 
 Deno does not aim to be API compatible with Node in any respect. Deno will
 export a single flat namespace "deno" under which all core functions are
-defined.  We leave it up to users to wrap Deno's namespace to provide some
+defined. We leave it up to users to wrap Deno's namespace to provide some
 compatibility with Node.
 
-*Top-level await*: This will be put off until at least deno2 Milestone1 is
-complete. One of the major problems is that top-level await calls are not
-syntactically valid TypeScript.
+#### Top-level Await (Not Implemented)
 
-Functions exported under Deno namespace:
-```ts
-deno.readFileSync(filename: string): ArrayBuffer;
-deno.writeFileSync(filename: string, data: Uint8Array, perm: number): void;
-```
+[#471](https://github.com/denoland/deno/issues/471)
 
-Timers:
-```ts
-setTimeout(cb: TimerCallback, delay: number, ...args: any[]): number;
-setInterval(cb: TimerCallbac, duration: number, ...args: any[]): number;
-clearTimeout(timerId: number);
-clearInterval(timerId: number);
-```
+This will be put off until at least deno2 Milestone1 is complete. One of the
+major problems is that top-level await calls are not syntactically valid
+TypeScript.
 
-Console:
-```ts
-declare var console: {
-  log(...args: any[]): void;
-  error(...args: any[]): void;
-  assert(assertion: boolean, ...msg: any[]): void;
-}
-```
+#### I/O (Not Implemented) [#721](https://github.com/denoland/deno/issues/721)
 
-URL:
-```ts
-URL(url: string, base?: string): URL;
-```
+There are many OS constructs that perform I/O: files, sockets, pipes. Deno aims
+to provide a unified lowest common denominator interface to work with these
+objects. Deno needs to operate on all of these asynchronously in order to not
+block the event loop and it.
 
-Text encoding:
-```ts
-declare var TextEncoder: {
-  new (utfLabel?: string, options?: TextEncoderOptions): TextEncoder;
-  (utfLabel?: string, options?: TextEncoderOptions): TextEncoder;
-  encoding: string;
-};
-
-declare var TextDecoder: {
-  new (label?: string, options?: TextDecoderOptions): TextDecoder;
-  (label?: string, options?: TextDecoderOptions): TextDecoder;
-  encoding: string;
-};
-```
-
-Fetch API:
-```ts
-fetch(input?: Request | string, init?: RequestInit): Promise<Response>;
-```
-
-#### I/O
-
-There are many OS constructs that perform I/O: files, sockets, pipes.
-Deno aims to provide a unified lowest common denominator interface to work with
-these objects. Deno needs to operate on all of these asynchronously in order
-to not block the event loop and it.
-
-Sockets and pipes support non-blocking reads and write.  Generally file I/O is
+Sockets and pipes support non-blocking reads and write. Generally file I/O is
 blocking but it can be done in a thread pool to avoid blocking the main thread.
 Although file I/O can be made asynchronous, it does not support the same
 non-blocking reads and writes that sockets and pipes do.
 
 The following interfaces support files, socket, and pipes and are heavily
 inspired by Go. The main difference in porting to JavaScript is that errors will
-be handled by exceptions, modulo EOF, which is returned as part of
-`ReadResult`.
+be handled by exceptions, modulo EOF, which is returned as part of `ReadResult`.
 
 ```ts
 // The bytes read during an I/O call and a boolean indicating EOF.
@@ -310,7 +254,7 @@ interface Reader {
   // does not indicate EOF.
   //
   // Implementations must not retain p.
-  async read(p: ArrayBufferView): Promise<ReadResult>;
+  read(p: ArrayBufferView): Promise<ReadResult>;
 }
 
 // Writer is the interface that wraps the basic write() method.
@@ -323,7 +267,7 @@ interface Writer {
   // slice data, even temporarily.
   //
   // Implementations must not retain p.
-  async write(p: ArrayBufferView): Promise<number>;
+  write(p: ArrayBufferView): Promise<number>;
 }
 
 // https://golang.org/pkg/io/#Closer
@@ -344,29 +288,31 @@ interface Seeker {
   // Seeking to an offset before the start of the file is an error. Seeking to
   // any positive offset is legal, but the behavior of subsequent I/O operations
   // on the underlying object is implementation-dependent.
-  async seek(offset: number, whence: number): Promise<void>;
+  seek(offset: number, whence: number): Promise<void>;
 }
 
 // https://golang.org/pkg/io/#ReadCloser
-interface ReaderCloser extends Reader, Closer { }
+interface ReaderCloser extends Reader, Closer {}
 
 // https://golang.org/pkg/io/#WriteCloser
-interface WriteCloser extends Writer, Closer { }
+interface WriteCloser extends Writer, Closer {}
 
 // https://golang.org/pkg/io/#ReadSeeker
-interface ReadSeeker extends Reader, Seeker { }
+interface ReadSeeker extends Reader, Seeker {}
 
 // https://golang.org/pkg/io/#WriteSeeker
-interface WriteSeeker extends Writer, Seeker { }
+interface WriteSeeker extends Writer, Seeker {}
 
 // https://golang.org/pkg/io/#ReadWriteCloser
-interface ReadWriteCloser extends Reader, Writer, Closer { }
+interface ReadWriteCloser extends Reader, Writer, Closer {}
 
 // https://golang.org/pkg/io/#ReadWriteSeeker
-interface ReadWriteSeeker extends Reader, Writer, Seeker { }
+interface ReadWriteSeeker extends Reader, Writer, Seeker {}
 ```
+
 These interfaces are well specified, simple, and have very nice utility
 functions that will be easy to port. Some example utilites:
+
 ```ts
 // copy() copies from src to dst until either EOF is reached on src or an error
 // occurs. It returns the number of bytes copied and the first error encountered

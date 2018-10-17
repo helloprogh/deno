@@ -25,18 +25,6 @@ global.TypedArraySnapshots = () => {
   assert(snapshotted[3] === 7);
 };
 
-global.SendSuccess = () => {
-  libdeno.recv(msg => {
-    libdeno.print("SendSuccess: ok");
-  });
-};
-
-global.SendWrongByteLength = () => {
-  libdeno.recv(msg => {
-    assert(msg.byteLength === 3);
-  });
-};
-
 global.RecvReturnEmpty = () => {
   const m1 = new Uint8Array("abc".split("").map(c => c.charCodeAt(0)));
   const m2 = m1.slice();
@@ -103,18 +91,6 @@ global.JSSendArrayBufferViewTypes = () => {
   libdeno.send(dv);
 };
 
-global.JSSendNeutersBuffer = () => {
-  // Buffer should be neutered after transferring it to the native side.
-  const u8 = new Uint8Array([42]);
-  assert(u8.byteLength === 1);
-  assert(u8.buffer.byteLength === 1);
-  assert(u8[0] === 42);
-  const r = libdeno.send(u8);
-  assert(u8.byteLength === 0);
-  assert(u8.buffer.byteLength === 0);
-  assert(u8[0] === undefined);
-};
-
 // The following join has caused SnapshotBug to segfault when using kKeep.
 [].join("");
 
@@ -124,7 +100,7 @@ global.SnapshotBug = () => {
 
 global.GlobalErrorHandling = () => {
   libdeno.setGlobalErrorHandler((message, source, line, col, error) => {
-    libdeno.print(`line ${line} col ${col}`);
+    libdeno.print(`line ${line} col ${col}`, true);
     assert("ReferenceError: notdefined is not defined" === message);
     assert(source === "helloworld.js");
     assert(line === 3);
@@ -140,13 +116,60 @@ global.DoubleGlobalErrorHandlingFails = () => {
   libdeno.setGlobalErrorHandler((message, source, line, col, error) => {});
 };
 
-global.SendNullAllocPtr = () => {
-  libdeno.recv(msg => {
-    assert(msg instanceof Uint8Array);
-    assert(msg.byteLength === 4);
-    assert(msg[0] === "a".charCodeAt(0));
-    assert(msg[1] === "b".charCodeAt(0));
-    assert(msg[2] === "c".charCodeAt(0));
-    assert(msg[3] === "d".charCodeAt(0));
-  });
+// Allocate this buf at the top level to avoid GC.
+const dataBuf = new Uint8Array([3, 4]);
+
+global.DataBuf = () => {
+  const a = new Uint8Array([1, 2]);
+  const b = dataBuf;
+  // The second parameter of send should modified by the
+  // privileged side.
+  const r = libdeno.send(a, b);
+  assert(r == null);
+  // b is different.
+  assert(b[0] === 4);
+  assert(b[1] === 2);
+  // Now we modify it again.
+  b[0] = 9;
+  b[1] = 8;
 };
+
+global.PromiseRejectCatchHandling = () => {
+  let count = 0;
+  let promiseRef = null;
+  // When we have an error, libdeno sends something
+  function assertOrSend(cond) {
+    if (!cond) {
+      libdeno.send(new Uint8Array([42]));
+    }
+  }
+  libdeno.setPromiseErrorExaminer(() => {
+    assertOrSend(count === 2);
+  });
+  libdeno.setPromiseRejectHandler((error, event, promise) => {
+    count++;
+    if (event === "RejectWithNoHandler") {
+      assertOrSend(error instanceof Error);
+      assertOrSend(error.message === "message");
+      assertOrSend(count === 1);
+      promiseRef = promise;
+    } else if (event === "HandlerAddedAfterReject") {
+      assertOrSend(count === 2);
+      assertOrSend(promiseRef === promise);
+    }
+    // Should never reach 3!
+    assertOrSend(count !== 3);
+  });
+
+  async function fn() {
+    throw new Error("message");
+  }
+
+  (async () => {
+    try {
+      await fn();
+    } catch (e) {
+      assertOrSend(count === 2);
+    }
+  })();
+}

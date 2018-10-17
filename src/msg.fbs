@@ -4,10 +4,8 @@ union Any {
   CodeFetch,
   CodeFetchRes,
   CodeCache,
+  SetTimeout,
   Exit,
-  TimerStart,
-  TimerReady,
-  TimerClear,
   Environ,
   EnvironRes,
   FetchReq,
@@ -18,11 +16,36 @@ union Any {
   Remove,
   ReadFile,
   ReadFileRes,
+  ReadDir,
+  ReadDirRes,
   WriteFile,
+  CopyFile,
   Rename,
+  Readlink,
+  ReadlinkRes,
+  Symlink,
   Stat,
   StatRes,
   SetEnv,
+  Truncate,
+  Open,
+  OpenRes,
+  Read,
+  ReadRes,
+  Write,
+  WriteRes,
+  Close,
+  Shutdown,
+  Listen,
+  ListenRes,
+  Accept,
+  Dial,
+  NewConn,
+  Chdir,
+  Cwd,
+  CwdRes,
+  Metrics,
+  MetricsRes,
 }
 
 enum ErrorKind: byte {
@@ -49,6 +72,8 @@ enum ErrorKind: byte {
   Other,
   UnexpectedEof,
 
+  BadResource,
+
   // url errors
 
   EmptyHost,
@@ -71,12 +96,18 @@ enum ErrorKind: byte {
   HttpOther,
 }
 
+table Cwd {}
+
+table CwdRes {
+  cwd: string;
+}
+
 table Base {
   cmd_id: uint32;
   sync: bool = true; // TODO(ry) Change default to false.
   error_kind: ErrorKind = NoError;
   error: string;
-  msg: Any;
+  inner: Any;
 }
 
 table Start {
@@ -88,6 +119,11 @@ table StartRes {
   argv: [string];
   debug_flag: bool;
   deps_flag: bool;
+  recompile_flag: bool;
+  types_flag: bool;
+  version_flag: bool;
+  deno_version: string;
+  v8_version: string;
 }
 
 table CodeFetch {
@@ -111,22 +147,16 @@ table CodeCache {
   output_code: string;
 }
 
+table Chdir {
+  directory: string;
+}
+
+table SetTimeout {
+  timeout: double;
+}
+
 table Exit {
   code: int;
-}
-
-table TimerStart {
-  id: uint;
-  delay: uint;
-}
-
-table TimerReady {
-  id: uint;
-  canceled: bool;
-}
-
-table TimerClear {
-  id: uint;
 }
 
 table Environ {}
@@ -188,6 +218,14 @@ table ReadFileRes {
   data: [ubyte];
 }
 
+table ReadDir {
+  path: string;
+}
+
+table ReadDirRes {
+  entries: [StatRes];
+}
+
 table WriteFile {
   filename: string;
   data: [ubyte];
@@ -195,9 +233,27 @@ table WriteFile {
   // perm specified by https://godoc.org/os#FileMode
 }
 
+table CopyFile {
+  from: string;
+  to: string;
+}
+
 table Rename {
   oldpath: string;
   newpath: string;
+}
+
+table Readlink {
+  name: string;
+}
+
+table ReadlinkRes {
+  path: string;
+}
+
+table Symlink {
+  oldname: string;
+  newname: string;
 }
 
 table Stat {
@@ -212,8 +268,86 @@ table StatRes {
   modified:ulong;
   accessed:ulong;
   created:ulong;
-  mode: int = -1;
-  // negative mode for invalid (Windows); default to invalid
+  mode: uint;
+  has_mode: bool; // false on windows
+  name: string;
+  path: string;
+}
+
+table Truncate {
+  name: string;
+  len: uint;
+}
+
+table Open {
+  filename: string;
+  perm: uint;
+}
+
+table OpenRes {
+  rid: int;
+}
+
+table Read {
+  rid: int;
+  // (ptr, len) is passed as second parameter to libdeno.send().
+}
+
+table ReadRes {
+  nread: uint;
+  eof: bool;
+}
+
+table Write {
+  rid: int;
+}
+
+table WriteRes {
+  nbyte: uint;
+}
+
+table Close {
+  rid: int;
+}
+
+table Shutdown {
+  rid: int;
+  how: uint;
+}
+
+table Listen {
+  network: string;
+  address: string;
+}
+
+table ListenRes {
+  rid: int;
+}
+
+table Accept {
+  rid: int;
+}
+
+table Dial {
+  network: string;
+  address: string;
+}
+
+// Response to Accept and Dial.
+table NewConn {
+  rid: int;
+  remote_addr: string;
+  local_addr: string;
+}
+
+table Metrics {}
+
+table MetricsRes {
+  ops_dispatched: uint64;
+  ops_completed: uint64;
+  bytes_sent_control: uint64;
+  bytes_sent_data: uint64;
+  bytes_received: uint64;
 }
 
 root_type Base;

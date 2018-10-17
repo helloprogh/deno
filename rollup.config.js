@@ -7,8 +7,10 @@ import nodeResolve from "rollup-plugin-node-resolve";
 import typescriptPlugin from "rollup-plugin-typescript2";
 import { createFilter } from "rollup-pluginutils";
 import typescript from "typescript";
+import MagicString from "magic-string";
 
 const mockPath = path.join(__dirname, "js", "mock_builtin.js");
+const platformPath = path.join(__dirname, "js", "platform.ts");
 const tsconfig = path.join(__dirname, "tsconfig.json");
 const typescriptPath = `${
   process.env.BASEPATH
@@ -23,12 +25,6 @@ const tsconfigOverride = {
     }
   }
 };
-
-// this is a preamble for the `globals.d.ts` file to allow it to be the default
-// lib for deno.
-const libPreamble = `/// <reference no-default-lib="true"/>
-/// <reference lib="esnext" />
-`;
 
 // this is a rollup plugin which will look for imports ending with `!string` and resolve
 // them with a module that will inline the contents of the file as a string.  Needed to
@@ -68,10 +64,49 @@ function strings({ include, exclude } = {}) {
     transform(code, id) {
       if (filter(id)) {
         return {
-          code: `export default ${JSON.stringify(
-            id.endsWith("globals.d.ts") ? libPreamble + code : code
-          )};`,
+          code: `export default ${JSON.stringify(code)};`,
           map: { mappings: "" }
+        };
+      }
+    }
+  };
+}
+
+const archNodeToDeno = {
+  x64: "x64"
+};
+const osNodeToDeno = {
+  win32: "win",
+  darwin: "mac",
+  linux: "linux"
+};
+
+// Inject deno.platform.arch and deno.platform.os
+function platform({ include, exclude } = {}) {
+  if (!include) {
+    throw new Error("include option must be passed");
+  }
+
+  const filter = createFilter(include, exclude);
+
+  return {
+    name: "platform",
+    /**
+     * @param {any} _code
+     * @param {string} id
+     */
+    transform(_code, id) {
+      if (filter(id)) {
+        // Adapted from https://github.com/rollup/rollup-plugin-inject/blob/master/src/index.js
+        const arch = archNodeToDeno[process.arch];
+        const os = osNodeToDeno[process.platform];
+        // We do not have to worry about the interface here, because this is just to generate
+        // the actual runtime code, not any type information integrated into Deno
+        const magicString = new MagicString(`
+export const platform = { arch: "${arch}", os:"${os}" };`);
+        return {
+          code: magicString.toString(),
+          map: magicString.generateMap()
         };
       }
     }
@@ -104,6 +139,11 @@ export default function makeConfig(commandOptions) {
     },
 
     plugins: [
+      // inject platform and arch from Node
+      platform({
+        include: [platformPath]
+      }),
+
       // would prefer to use `rollup-plugin-virtual` to inject the empty module, but there
       // is an issue with `rollup-plugin-commonjs` which causes errors when using the
       // virtual plugin (see: rollup/rollup-plugin-commonjs#315), this means we have to use

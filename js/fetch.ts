@@ -9,102 +9,95 @@ import {
 } from "./util";
 import { flatbuffers } from "flatbuffers";
 import { sendAsync } from "./dispatch";
-import * as fbs from "gen/msg_generated";
-import {
-  Headers,
-  Request,
-  Response,
-  Blob,
-  RequestInit,
-  HeadersInit,
-  FormData
-} from "./dom_types";
+import * as msg from "gen/msg_generated";
+import * as domTypes from "./dom_types";
 import { TextDecoder } from "./text_encoding";
 import { DenoBlob } from "./blob";
 
-interface Header {
-  name: string;
-  value: string;
-}
+// ref: https://fetch.spec.whatwg.org/#dom-headers
+export class DenoHeaders implements domTypes.Headers {
+  private headerMap: Map<string, string> = new Map();
 
-export class DenoHeaders implements Headers {
-  private readonly headerList: Header[] = [];
-
-  constructor(init?: HeadersInit) {
-    if (init) {
-      this._fill(init);
+  constructor(init?: domTypes.HeadersInit) {
+    if (arguments.length === 0 || init === undefined) {
+      return;
     }
-  }
 
-  private _append(header: Header): void {
-    // TODO(qti3e) Check header based on the fetch spec.
-    this._appendToHeaderList(header);
-  }
-
-  private _appendToHeaderList(header: Header): void {
-    const lowerCaseName = header.name.toLowerCase();
-    for (let i = 0; i < this.headerList.length; ++i) {
-      if (this.headerList[i].name.toLowerCase() === lowerCaseName) {
-        header.name = this.headerList[i].name;
-      }
-    }
-    this.headerList.push(header);
-  }
-
-  private _fill(init: HeadersInit): void {
-    if (Array.isArray(init)) {
-      for (let i = 0; i < init.length; ++i) {
-        const header = init[i];
-        if (header.length !== 2) {
+    if (init instanceof DenoHeaders) {
+      // init is the instance of Header
+      init.forEach((value: string, name: string) => {
+        this.headerMap.set(name, value);
+      });
+    } else if (Array.isArray(init)) {
+      // init is a sequence
+      init.forEach(item => {
+        if (item.length !== 2) {
           throw new TypeError("Failed to construct 'Headers': Invalid value");
         }
-        this._append({
-          name: header[0],
-          value: header[1]
-        });
-      }
+        const [name, value] = this.normalizeParams(item[0], item[1]);
+        const v = this.headerMap.get(name);
+        const str = v ? `${v}, ${value}` : value;
+        this.headerMap.set(name, str);
+      });
+    } else if (Object.prototype.toString.call(init) === "[object Object]") {
+      // init is a object
+      const names = Object.keys(init);
+      names.forEach(name => {
+        const value = (init as Record<string, string>)[name];
+        const [newname, newvalue] = this.normalizeParams(name, value);
+        this.headerMap.set(newname, newvalue);
+      });
     } else {
-      for (const key in init) {
-        this._append({
-          name: key,
-          value: init[key]
-        });
-      }
+      throw new TypeError("Failed to construct 'Headers': Invalid value");
     }
+  }
+
+  private normalizeParams(name: string, value?: string): string[] {
+    name = String(name).toLowerCase();
+    value = String(value).trim();
+    return [name, value];
   }
 
   append(name: string, value: string): void {
-    this._appendToHeaderList({ name, value });
+    const [newname, newvalue] = this.normalizeParams(name, value);
+    const v = this.headerMap.get(newname);
+    const str = v ? `${v}, ${newvalue}` : newvalue;
+    this.headerMap.set(newname, str);
   }
 
   delete(name: string): void {
-    assert(false, "Implement me");
+    const [newname] = this.normalizeParams(name);
+    this.headerMap.delete(newname);
   }
+
   get(name: string): string | null {
-    for (const header of this.headerList) {
-      if (header.name.toLowerCase() === name.toLowerCase()) {
-        return header.value;
-      }
-    }
-    return null;
+    const [newname] = this.normalizeParams(name);
+    const value = this.headerMap.get(newname);
+    return value || null;
   }
+
   has(name: string): boolean {
-    assert(false, "Implement me");
-    return false;
+    const [newname] = this.normalizeParams(name);
+    return this.headerMap.has(newname);
   }
+
   set(name: string, value: string): void {
-    assert(false, "Implement me");
+    const [newname, newvalue] = this.normalizeParams(name, value);
+    this.headerMap.set(newname, newvalue);
   }
+
   forEach(
-    callbackfn: (value: string, key: string, parent: Headers) => void,
+    callbackfn: (value: string, key: string, parent: domTypes.Headers) => void,
     // tslint:disable-next-line:no-any
     thisArg?: any
   ): void {
-    assert(false, "Implement me");
+    this.headerMap.forEach((value, name) => {
+      callbackfn(value, name, this);
+    });
   }
 }
 
-class FetchResponse implements Response {
+class FetchResponse implements domTypes.Response {
   readonly url: string = "";
   body: null;
   bodyUsed = false; // TODO
@@ -112,7 +105,7 @@ class FetchResponse implements Response {
   readonly type = "basic"; // TODO
   redirected = false; // TODO
   headers: DenoHeaders;
-  readonly trailer: Promise<Headers>;
+  readonly trailer: Promise<domTypes.Headers>;
   //private bodyChunks: Uint8Array[] = [];
   private first = true;
   private bodyWaiter: Resolvable<ArrayBuffer>;
@@ -134,16 +127,16 @@ class FetchResponse implements Response {
     return this.bodyWaiter;
   }
 
-  async blob(): Promise<Blob> {
+  async blob(): Promise<domTypes.Blob> {
     const arrayBuffer = await this.arrayBuffer();
     return new DenoBlob([arrayBuffer], {
       type: this.headers.get("content-type") || ""
     });
   }
 
-  async formData(): Promise<FormData> {
+  async formData(): Promise<domTypes.FormData> {
     notImplemented();
-    return {} as FormData;
+    return {} as domTypes.FormData;
   }
 
   async json(): Promise<object> {
@@ -161,15 +154,15 @@ class FetchResponse implements Response {
     return 200 <= this.status && this.status < 300;
   }
 
-  clone(): Response {
+  clone(): domTypes.Response {
     notImplemented();
-    return {} as Response;
+    return {} as domTypes.Response;
   }
 
   onHeader?: (res: FetchResponse) => void;
   onError?: (error: Error) => void;
 
-  onMsg(base: fbs.Base) {
+  onMsg(base: msg.Base) {
     /*
     const error = base.error();
     if (error != null) {
@@ -185,39 +178,40 @@ class FetchResponse implements Response {
   }
 }
 
+/** Fetch a resource from the network. */
 export async function fetch(
-  input?: Request | string,
-  init?: RequestInit
-): Promise<Response> {
+  input?: domTypes.Request | string,
+  init?: domTypes.RequestInit
+): Promise<domTypes.Response> {
   const url = input as string;
   log("dispatch FETCH_REQ", url);
 
   // Send FetchReq message
   const builder = new flatbuffers.Builder();
   const url_ = builder.createString(url);
-  fbs.FetchReq.startFetchReq(builder);
-  fbs.FetchReq.addUrl(builder, url_);
+  msg.FetchReq.startFetchReq(builder);
+  msg.FetchReq.addUrl(builder, url_);
   const resBase = await sendAsync(
     builder,
-    fbs.Any.FetchReq,
-    fbs.FetchReq.endFetchReq(builder)
+    msg.Any.FetchReq,
+    msg.FetchReq.endFetchReq(builder)
   );
 
   // Decode FetchRes
-  assert(fbs.Any.FetchRes === resBase.msgType());
-  const msg = new fbs.FetchRes();
-  assert(resBase.msg(msg) != null);
+  assert(msg.Any.FetchRes === resBase.innerType());
+  const inner = new msg.FetchRes();
+  assert(resBase.inner(inner) != null);
 
-  const status = msg.status();
-  const bodyArray = msg.bodyArray();
+  const status = inner.status();
+  const bodyArray = inner.bodyArray();
   assert(bodyArray != null);
   const body = typedArrayToArrayBuffer(bodyArray!);
 
   const headersList: Array<[string, string]> = [];
-  const len = msg.headerKeyLength();
+  const len = inner.headerKeyLength();
   for (let i = 0; i < len; ++i) {
-    const key = msg.headerKey(i);
-    const value = msg.headerValue(i);
+    const key = inner.headerKey(i);
+    const value = inner.headerValue(i);
     headersList.push([key, value]);
   }
 

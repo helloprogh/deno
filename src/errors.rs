@@ -15,15 +15,22 @@ pub struct DenoError {
 
 #[derive(Debug)]
 enum Repr {
-  // Simple(ErrorKind),
+  Simple(ErrorKind, String),
   IoErr(io::Error),
   UrlErr(url::ParseError),
   HyperErr(hyper::Error),
 }
 
+pub fn new(kind: ErrorKind, msg: String) -> DenoError {
+  DenoError {
+    repr: Repr::Simple(kind, msg),
+  }
+}
+
 impl DenoError {
   pub fn kind(&self) -> ErrorKind {
     match self.repr {
+      Repr::Simple(kind, ref _msg) => kind,
       // Repr::Simple(kind) => kind,
       Repr::IoErr(ref err) => {
         use std::io::ErrorKind::*;
@@ -87,10 +94,10 @@ impl DenoError {
 impl fmt::Display for DenoError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self.repr {
+      Repr::Simple(_kind, ref err_str) => f.pad(err_str),
       Repr::IoErr(ref err) => err.fmt(f),
       Repr::UrlErr(ref err) => err.fmt(f),
       Repr::HyperErr(ref err) => err.fmt(f),
-      // Repr::Simple(..) => Ok(()),
     }
   }
 }
@@ -98,19 +105,19 @@ impl fmt::Display for DenoError {
 impl std::error::Error for DenoError {
   fn description(&self) -> &str {
     match self.repr {
+      Repr::Simple(_kind, ref msg) => msg.as_str(),
       Repr::IoErr(ref err) => err.description(),
       Repr::UrlErr(ref err) => err.description(),
       Repr::HyperErr(ref err) => err.description(),
-      // Repr::Simple(..) => "FIXME",
     }
   }
 
   fn cause(&self) -> Option<&std::error::Error> {
     match self.repr {
+      Repr::Simple(_kind, ref _msg) => None,
       Repr::IoErr(ref err) => Some(err),
       Repr::UrlErr(ref err) => Some(err),
       Repr::HyperErr(ref err) => Some(err),
-      // Repr::Simple(..) => None,
     }
   }
 }
@@ -140,4 +147,15 @@ impl From<hyper::Error> for DenoError {
       repr: Repr::HyperErr(err),
     }
   }
+}
+
+pub fn bad_resource() -> DenoError {
+  new(ErrorKind::BadResource, String::from("bad resource id"))
+}
+
+pub fn permission_denied() -> DenoError {
+  new(
+    ErrorKind::PermissionDenied,
+    String::from("permission denied"),
+  )
 }

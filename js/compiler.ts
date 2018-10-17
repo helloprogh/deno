@@ -1,9 +1,9 @@
 // Copyright 2018 the Deno authors. All rights reserved. MIT license.
-/// <amd-module name="compiler"/>
 import * as ts from "typescript";
 import { assetSourceCode } from "./assets";
+// tslint:disable-next-line:no-circular-imports
 import * as deno from "./deno";
-import { globalEval } from "./global-eval";
+import { globalEval } from "./global_eval";
 import { libdeno } from "./libdeno";
 import { window } from "./globals";
 import * as os from "./os";
@@ -13,6 +13,7 @@ import * as sourceMaps from "./v8_source_maps";
 
 const EOL = "\n";
 const ASSETS = "$asset$";
+const LIB_RUNTIME = "lib.deno_runtime.d.ts";
 
 // tslint:disable:no-any
 type AmdCallback = (...args: any[]) => void;
@@ -26,38 +27,29 @@ type AMDRequire = (
   errback: AmdErrback
 ) => void;
 
-/**
- * The location that a module is being loaded from. This could be a directory,
+/** The location that a module is being loaded from. This could be a directory,
  * like `.`, or it could be a module specifier like
  * `http://gist.github.com/somefile.ts`
  */
 type ContainingFile = string;
-/**
- * The internal local filename of a compiled module. It will often be something
+/** The internal local filename of a compiled module. It will often be something
  * like `/home/ry/.deno/gen/f7b4605dfbc4d3bb356e98fda6ceb1481e4a8df5.js`
  */
 type ModuleFileName = string;
-/**
- * The original resolved resource name.
+/** The original resolved resource name.
  * Path to cached module file or URL from which dependency was retrieved
  */
 type ModuleId = string;
-/**
- * The external name of a module - could be a URL or could be a relative path.
+/** The external name of a module - could be a URL or could be a relative path.
  * Examples `http://gist.github.com/somefile.ts` or `./somefile.ts`
  */
 type ModuleSpecifier = string;
-/**
- * The compiled source code which is cached in `.deno/gen/`
- */
+/** The compiled source code which is cached in `.deno/gen/` */
 type OutputCode = string;
-/**
- * The original source code
- */
+/** The original source code */
 type SourceCode = string;
 
-/**
- * Abstraction of the APIs required from the `os` module so they can be
+/** Abstraction of the APIs required from the `os` module so they can be
  * easily mocked.
  * @internal
  */
@@ -67,8 +59,7 @@ export interface Os {
   exit: typeof os.exit;
 }
 
-/**
- * Abstraction of the APIs required from the `typescript` module so they can
+/** Abstraction of the APIs required from the `typescript` module so they can
  * be easily mocked.
  * @internal
  */
@@ -78,8 +69,7 @@ export interface Ts {
   formatDiagnosticsWithColorAndContext: typeof ts.formatDiagnosticsWithColorAndContext;
 }
 
-/**
- * A simple object structure for caching resolved modules and their contents.
+/** A simple object structure for caching resolved modules and their contents.
  *
  * Named `ModuleMetaData` to clarify it is just a representation of meta data of
  * the module, not the actual module instance.
@@ -117,8 +107,7 @@ export class ModuleMetaData implements ts.IScriptSnapshot {
   }
 }
 
-/**
- * A singleton class that combines the TypeScript Language Service host API
+/** A singleton class that combines the TypeScript Language Service host API
  * with Deno specific APIs to provide an interface for compiling and running
  * TypeScript and JavaScript modules.
  */
@@ -169,9 +158,10 @@ export class DenoCompiler
   // A reference to the global scope so it can be monkey patched during
   // testing
   private _window = window;
+  // Flags forcing recompilation of TS code
+  public recompile = false;
 
-  /**
-   * Drain the run queue, retrieving the arguments for the module
+  /** Drain the run queue, retrieving the arguments for the module
    * factory and calling the module's factory.
    */
   private _drainRunQueue(): void {
@@ -192,8 +182,7 @@ export class DenoCompiler
     }
   }
 
-  /**
-   * Get the dependencies for a given module, but don't run the module,
+  /** Get the dependencies for a given module, but don't run the module,
    * just add the module factory to the run queue.
    */
   private _gatherDependencies(moduleMetaData: ModuleMetaData): void {
@@ -213,9 +202,7 @@ export class DenoCompiler
     this._window.define = undefined;
   }
 
-  /**
-   * Retrieve the arguments to pass a module's factory function.
-   */
+  /** Retrieve the arguments to pass a module's factory function. */
   // tslint:disable-next-line:no-any
   private _getFactoryArguments(moduleMetaData: ModuleMetaData): any[] {
     if (!moduleMetaData.deps) {
@@ -238,8 +225,7 @@ export class DenoCompiler
     });
   }
 
-  /**
-   * The TypeScript language service often refers to the resolved fileName of
+  /** The TypeScript language service often refers to the resolved fileName of
    * a module, this is a shortcut to avoid unnecessary module resolution logic
    * for modules that may have been initially resolved by a `moduleSpecifier`
    * and `containingFile`.  Also, `resolveModule()` throws when the module
@@ -257,9 +243,7 @@ export class DenoCompiler
         : undefined;
   }
 
-  /**
-   * Create a localized AMD `define` function and return it.
-   */
+  /** Create a localized AMD `define` function and return it. */
   private _makeDefine(moduleMetaData: ModuleMetaData): AmdDefine {
     return (deps: ModuleSpecifier[], factory: AmdFactory): void => {
       this._log("compiler.localDefine", moduleMetaData.fileName);
@@ -292,8 +276,7 @@ export class DenoCompiler
     };
   }
 
-  /**
-   * Returns a require that specifically handles the resolution of a transpiled
+  /** Returns a require that specifically handles the resolution of a transpiled
    * emit of a dynamic ES `import()` from TypeScript.
    */
   private _makeLocalRequire(moduleMetaData: ModuleMetaData): AMDRequire {
@@ -320,8 +303,7 @@ export class DenoCompiler
     };
   }
 
-  /**
-   * Given a `moduleSpecifier` and `containingFile` retrieve the cached
+  /** Given a `moduleSpecifier` and `containingFile` retrieve the cached
    * `fileName` for a given module.  If the module has yet to be resolved
    * this will return `undefined`.
    */
@@ -337,8 +319,8 @@ export class DenoCompiler
     return undefined;
   }
 
-  /**
-   * Resolve the `fileName` for a given `moduleSpecifier` and `containingFile`
+  /** Resolve the `fileName` for a given `moduleSpecifier` and
+   * `containingFile`
    */
   private _resolveModuleName(
     moduleSpecifier: ModuleSpecifier,
@@ -348,8 +330,7 @@ export class DenoCompiler
     return moduleMetaData ? moduleMetaData.fileName : undefined;
   }
 
-  /**
-   * Caches the resolved `fileName` in relationship to the `moduleSpecifier`
+  /** Caches the resolved `fileName` in relationship to the `moduleSpecifier`
    * and `containingFile` in order to reduce calls to the privileged side
    * to retrieve the contents of a module.
    */
@@ -367,8 +348,7 @@ export class DenoCompiler
     innerMap.set(moduleSpecifier, fileName);
   }
 
-  /**
-   * Setup being able to map back source references back to their source
+  /** Setup being able to map back source references back to their source
    *
    * TODO is this the best place for this?  It is tightly coupled to how the
    * compiler works, but it is also tightly coupled to how the whole runtime
@@ -410,16 +390,16 @@ export class DenoCompiler
 
   // Deno specific compiler API
 
-  /**
-   * Retrieve the output of the TypeScript compiler for a given module and
-   * cache the result.
+  /** Retrieve the output of the TypeScript compiler for a given module and
+   * cache the result. Re-compilation can be forced using '--recompile' flag.
    */
   compile(moduleMetaData: ModuleMetaData): OutputCode {
-    this._log("compiler.compile", moduleMetaData.fileName);
-    if (moduleMetaData.outputCode) {
+    const recompile = !!this.recompile;
+    if (!recompile && moduleMetaData.outputCode) {
       return moduleMetaData.outputCode;
     }
-    const { fileName, sourceCode } = moduleMetaData;
+    const { fileName, sourceCode, moduleId } = moduleMetaData;
+    console.warn("Compiling", moduleId);
     const service = this._service;
     const output = service.getEmitOutput(fileName);
 
@@ -458,9 +438,9 @@ export class DenoCompiler
     return moduleMetaData.outputCode;
   }
 
-  /**
-   * For a given module specifier and containing file, return a list of absolute
-   * identifiers for dependent modules that are required by this module.
+  /** For a given module specifier and containing file, return a list of
+   * absolute identifiers for dependent modules that are required by this
+   * module.
    */
   getModuleDependencies(
     moduleSpecifier: ModuleSpecifier,
@@ -486,8 +466,7 @@ export class DenoCompiler
     return dependencies;
   }
 
-  /**
-   * Given a `moduleSpecifier` and `containingFile`, resolve the module and
+  /** Given a `moduleSpecifier` and `containingFile`, resolve the module and
    * return the `ModuleMetaData`.
    */
   resolveModule(
@@ -542,8 +521,7 @@ export class DenoCompiler
     return moduleMetaData;
   }
 
-  /**
-   * Load and run a module and all of its dependencies based on a module
+  /** Load and run a module and all of its dependencies based on a module
    * specifier and a containing file
    */
   run(
@@ -616,7 +594,7 @@ export class DenoCompiler
 
   getDefaultLibFileName(): string {
     this._log("getDefaultLibFileName()");
-    const moduleSpecifier = "globals.d.ts";
+    const moduleSpecifier = LIB_RUNTIME;
     const moduleMetaData = this.resolveModule(moduleSpecifier, ASSETS);
     return moduleMetaData.fileName;
   }
@@ -645,9 +623,9 @@ export class DenoCompiler
     this._log("resolveModuleNames()", { moduleNames, containingFile });
     return moduleNames.map(name => {
       let resolvedFileName;
-      if (name === "deno" || name === "compiler") {
-        // builtin modules are part of `globals.d.ts`
-        resolvedFileName = this._resolveModuleName("globals.d.ts", ASSETS);
+      if (name === "deno") {
+        // builtin modules are part of the runtime lib
+        resolvedFileName = this._resolveModuleName(LIB_RUNTIME, ASSETS);
       } else if (name === "typescript") {
         resolvedFileName = this._resolveModuleName("typescript.d.ts", ASSETS);
       } else {
@@ -671,8 +649,7 @@ export class DenoCompiler
 
   // Deno specific static properties and methods
 
-  /**
-   * Built in modules which can be returned to external modules
+  /** Built in modules which can be returned to external modules
    *
    * Placed as a private static otherwise we get use before
    * declared with the `DenoCompiler`
@@ -680,8 +657,7 @@ export class DenoCompiler
   // tslint:disable-next-line:no-any
   private static _builtins: { [mid: string]: any } = {
     typescript: ts,
-    deno,
-    compiler: { DenoCompiler, ModuleMetaData }
+    deno
   };
 
   private static _instance: DenoCompiler | undefined;
