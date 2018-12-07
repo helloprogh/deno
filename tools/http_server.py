@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# Copyright 2018 the Deno authors. All rights reserved. MIT license.
 # Many tests expect there to be an http server on port 4545 servering the deno
 # root directory.
 import os
@@ -13,9 +14,35 @@ PORT = 4545
 REDIRECT_PORT = 4546
 
 
+class ContentTypeHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
+    def guess_type(self, path):
+        if ".t1." in path:
+            return "text/typescript"
+        if ".t2." in path:
+            return "video/vnd.dlna.mpeg-tts"
+        if ".t3." in path:
+            return "video/mp2t"
+        if ".t4." in path:
+            return "application/x-typescript"
+        if ".j1." in path:
+            return "text/javascript"
+        if ".j2." in path:
+            return "application/ecmascript"
+        if ".j3." in path:
+            return "text/ecmascript"
+        if ".j4." in path:
+            return "application/x-javascript"
+        return SimpleHTTPServer.SimpleHTTPRequestHandler.guess_type(self, path)
+
+
 def server():
     os.chdir(root_path)  # Hopefully the main thread doesn't also chdir.
-    Handler = SimpleHTTPServer.SimpleHTTPRequestHandler
+    Handler = ContentTypeHandler
+    Handler.extensions_map.update({
+        ".ts": "application/typescript",
+        ".js": "application/javascript",
+        ".json": "application/json",
+    })
     SocketServer.TCPServer.allow_reuse_address = True
     s = SocketServer.TCPServer(("", PORT), Handler)
     print "Deno test server http://localhost:%d/" % PORT
@@ -35,7 +62,7 @@ def redirect_server():
     Handler = RedirectHandler
     SocketServer.TCPServer.allow_reuse_address = True
     s = SocketServer.TCPServer(("", REDIRECT_PORT), Handler)
-    print "Deno redirect server http://localhost:%d/ -> http://localhost:%d/" % (
+    print "redirect server http://localhost:%d/ -> http://localhost:%d/" % (
         REDIRECT_PORT, PORT)
     return s
 
@@ -52,11 +79,18 @@ def spawn():
     r_thread.daemon = True
     r_thread.start()
     sleep(1)  # TODO I'm too lazy to figure out how to do this properly.
+    return thread
+
+
+def main():
+    try:
+        thread = spawn()
+        while thread.is_alive():
+            sleep(10)
+    except KeyboardInterrupt:
+        pass
+    sys.exit(1)
 
 
 if __name__ == '__main__':
-    try:
-        spawn()
-        while True: sleep(100)
-    except KeyboardInterrupt:
-        sys.exit()
+    main()

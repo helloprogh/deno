@@ -1,3 +1,4 @@
+// Copyright 2018 the Deno authors. All rights reserved. MIT license.
 import { RawSourceMap } from "./types";
 import { globalEval } from "./global_eval";
 
@@ -15,6 +16,8 @@ interface Libdeno {
   send(control: ArrayBufferView, data?: ArrayBufferView): null | Uint8Array;
 
   print(x: string, isErr?: boolean): void;
+
+  shared: ArrayBuffer;
 
   setGlobalErrorHandler: (
     handler: (
@@ -42,4 +45,5 @@ interface Libdeno {
 }
 
 const window = globalEval("this");
+// @internal
 export const libdeno = window.libdeno as Libdeno;

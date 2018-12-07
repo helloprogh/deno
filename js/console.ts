@@ -1,3 +1,5 @@
+// Copyright 2018 the Deno authors. All rights reserved. MIT license.
+
 // tslint:disable-next-line:no-any
 type ConsoleContext = Set<any>;
 type ConsoleOptions = Partial<{
@@ -103,6 +105,8 @@ function stringify(
     case "undefined":
     case "symbol":
       return String(value);
+    case "bigint":
+      return `${value}n`;
     case "function":
       return createFunctionString(value as Function, ctx);
     case "object":

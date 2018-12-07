@@ -113,33 +113,91 @@ export function createSha1List(data) {
   return data.map(d => d.sha1);
 }
 
-// Formats the byte sizes e.g. 19000 -> 18.55 KB
-// Copied from https://stackoverflow.com/a/18650828
-export function formatBytes(a, b) {
-  if (0 == a) return "0 Bytes";
-  var c = 1024,
-    d = b || 2,
-    e = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"],
-    f = Math.floor(Math.log(a) / Math.log(c));
-  return parseFloat((a / Math.pow(c, f)).toFixed(d)) + " " + e[f];
+export function formatMB(bytes) {
+  return Math.round(bytes / (1024 * 1024));
 }
 
-export function formatSeconds(t) {
+export function formatReqSec(reqPerSec) {
+  return reqPerSec / 1000;
+}
+
+/**
+ * @param {string} id The id of dom element
+ * @param {string[]} categories categories for x-axis values
+ * @param {any[][]} columns The columns data
+ * @param {function} onclick action on clicking nodes of chart
+ * @param {string} yLabel label of y axis
+ * @param {function} yTickFormat formatter of y axis ticks
+ */
+function generate(
+  id,
+  categories,
+  columns,
+  onclick,
+  yLabel = "",
+  yTickFormat = null
+) {
+  const yAxis = {
+    padding: { bottom: 0 },
+    min: 0,
+    label: yLabel
+  };
+  if (yTickFormat) {
+    yAxis.tick = {
+      format: yTickFormat
+    };
+  }
+
+  // @ts-ignore
+  c3.generate({
+    bindto: id,
+    size: {
+      height: 300,
+      // @ts-ignore
+      width: window.chartWidth || 375 // TODO: do not use global variable
+    },
+    data: {
+      columns,
+      onclick
+    },
+    axis: {
+      x: {
+        type: "category",
+        show: false,
+        categories
+      },
+      y: yAxis
+    }
+  });
+}
+
+function formatSecsAsMins(t) {
+  // TODO use d3.round()
   const a = t % 60;
   const min = Math.floor(t / 60);
-  return a < 30 ? `${min} min` : `${min + 1} min`;
+  return a < 30 ? min : min + 1;
 }
 
-export function main() {
-  drawChartsFromBenchmarkData();
+/**
+ * @param dataUrl The url of benchramk data json.
+ */
+export function drawCharts(dataUrl) {
+  // TODO Using window["location"]["hostname"] instead of
+  // window.location.hostname because when deno runs app_test.js it gets a type
+  // error here, not knowing about window.location.  Ideally Deno would skip
+  // type check entirely on JS files.
+  if (window["location"]["hostname"] != "deno.github.io") {
+    dataUrl = "https://denoland.github.io/deno/" + dataUrl;
+  }
+  drawChartsFromBenchmarkData(dataUrl);
   drawChartsFromTravisData();
 }
 
 /**
  * Draws the charts from the benchmark data stored in gh-pages branch.
  */
-export async function drawChartsFromBenchmarkData() {
-  const data = await getJson("./data.json");
+export async function drawChartsFromBenchmarkData(dataUrl) {
+  const data = await getJson(dataUrl);
 
   const execTimeColumns = createExecTimeColumns(data);
   const throughputColumns = createThroughputColumns(data);
@@ -151,114 +209,29 @@ export async function drawChartsFromBenchmarkData() {
   const sha1ShortList = sha1List.map(sha1 => sha1.substring(0, 6));
 
   const viewCommitOnClick = _sha1List => d => {
+    // @ts-ignore
     window.open(
       `https://github.com/denoland/deno/commit/${_sha1List[d["index"]]}`
     );
   };
 
-  c3.generate({
-    bindto: "#exec-time-chart",
-    data: {
-      columns: execTimeColumns,
-      onclick: viewCommitOnClick(sha1List)
-    },
-    axis: {
-      x: {
-        type: "category",
-        show: false,
-        categories: sha1List
-      },
-      y: {
-        label: "seconds"
-      }
-    }
-  });
+  function gen(id, columns, yLabel = "", yTickFormat = null) {
+    generate(
+      id,
+      sha1ShortList,
+      columns,
+      viewCommitOnClick(sha1List),
+      yLabel,
+      yTickFormat
+    );
+  }
 
-  c3.generate({
-    bindto: "#throughput-chart",
-    data: {
-      columns: throughputColumns,
-      onclick: viewCommitOnClick(sha1List)
-    },
-    axis: {
-      x: {
-        type: "category",
-        show: false,
-        categories: sha1ShortList
-      },
-      y: {
-        label: "seconds"
-      }
-    }
-  });
-
-  c3.generate({
-    bindto: "#req-per-sec-chart",
-    data: {
-      columns: reqPerSecColumns,
-      onclick: viewCommitOnClick(sha1List)
-    },
-    axis: {
-      x: {
-        type: "category",
-        show: false,
-        categories: sha1ShortList
-      },
-      y: {
-        label: "seconds"
-      }
-    }
-  });
-
-  c3.generate({
-    bindto: "#binary-size-chart",
-    data: {
-      columns: binarySizeColumns,
-      onclick: viewCommitOnClick(sha1List)
-    },
-    axis: {
-      x: {
-        type: "category",
-        show: false,
-        categories: sha1ShortList
-      },
-      y: {
-        tick: {
-          format: d => formatBytes(d)
-        }
-      }
-    }
-  });
-
-  c3.generate({
-    bindto: "#thread-count-chart",
-    data: {
-      columns: threadCountColumns,
-      onclick: viewCommitOnClick(sha1List)
-    },
-    axis: {
-      x: {
-        type: "category",
-        show: false,
-        categories: sha1ShortList
-      }
-    }
-  });
-
-  c3.generate({
-    bindto: "#syscall-count-chart",
-    data: {
-      columns: syscallCountColumns,
-      onclick: viewCommitOnClick(sha1List)
-    },
-    axis: {
-      x: {
-        type: "category",
-        show: false,
-        categories: sha1ShortList
-      }
-    }
-  });
+  gen("#exec-time-chart", execTimeColumns, "seconds");
+  gen("#throughput-chart", throughputColumns, "seconds");
+  gen("#req-per-sec-chart", reqPerSecColumns, "1000 req/sec", formatReqSec);
+  gen("#binary-size-chart", binarySizeColumns, "megabytes", formatMB);
+  gen("#thread-count-chart", threadCountColumns, "threads");
+  gen("#syscall-count-chart", syscallCountColumns, "syscalls");
 }
 
 /**
@@ -266,6 +239,7 @@ export async function drawChartsFromBenchmarkData() {
  */
 export async function drawChartsFromTravisData() {
   const viewPullRequestOnClick = _prNumberList => d => {
+    // @ts-ignore
     window.open(
       `https://github.com/denoland/deno/pull/${_prNumberList[d["index"]]}`
     );
@@ -275,22 +249,12 @@ export async function drawChartsFromTravisData() {
   const travisCompileTimeColumns = createTravisCompileTimeColumns(travisData);
   const prNumberList = travisData.map(d => d.pull_request_number);
 
-  c3.generate({
-    bindto: "#travis-compile-time-chart",
-    data: {
-      columns: travisCompileTimeColumns,
-      onclick: viewPullRequestOnClick(prNumberList)
-    },
-    axis: {
-      x: {
-        type: "category",
-        categories: prNumberList
-      },
-      y: {
-        tick: {
-          format: d => formatSeconds(d)
-        }
-      }
-    }
-  });
+  generate(
+    "#travis-compile-time-chart",
+    prNumberList,
+    travisCompileTimeColumns,
+    viewPullRequestOnClick(prNumberList),
+    "minutes",
+    formatSecsAsMins
+  );
 }

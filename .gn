@@ -23,13 +23,19 @@ default_args = {
   use_ozone = false
   use_udev = false
 
+  # To disable "use_atk" and other features that we don't need.
+  is_desktop_linux = false
+
   # TODO(ry) We may want to turn on CFI at some point. Disabling for simplicity
   # for now. See http://clang.llvm.org/docs/ControlFlowIntegrity.html
   is_cfi = false
 
+  # Disabled due to CRT linking problems in Windows when using prebuilt V8.
+  # Works in other configurations.
   is_component_build = false
+
   symbol_level = 1
-  treat_warnings_as_errors = false
+  treat_warnings_as_errors = true
   rust_treat_warnings_as_errors = true
 
   # https://cs.chromium.org/chromium/src/docs/ccache_mac.md
@@ -41,7 +47,7 @@ default_args = {
   v8_experimental_extra_library_files = []
   v8_extra_library_files = []
   v8_imminent_deprecation_warnings = false
-  v8_monolithic = true
+  v8_monolithic = false
   v8_untrusted_code_mitigations = false
   v8_use_external_startup_data = false
   v8_use_snapshot = true

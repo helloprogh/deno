@@ -1,12 +1,15 @@
+# Copyright 2018 the Deno authors. All rights reserved. MIT license.
 solutions = [{
-    'url': 'https://chromium.googlesource.com/v8/v8.git@7.0.276.15',
+    'url': 'https://chromium.googlesource.com/v8/v8.git@7.1.302.4',
     'name': 'v8',
     'deps_file': 'DEPS',
     'custom_deps': {
+        'v8/build': None,
         'v8/third_party/catapult': None,
         'v8/third_party/colorama/src': None,
         'v8/testing/gmock': None,
         'v8/tools/swarming_client': None,
+        'v8/tools/gyp': None,
         'v8/third_party/instrumented_libraries': None,
         'v8/third_party/android_tools': None,
         'v8/third_party/depot_tools': None,
@@ -35,7 +38,7 @@ solutions = [{
     'cpplint'
 }, {
     'url':
-    'https://github.com/google/flatbuffers.git@d840856093fa7b935b0d6378c436bd633d006c8c',
+    'https://github.com/google/flatbuffers.git@80d148b1757f0fab9305616d69d876378405843a',
     'name':
     'flatbuffers'
 }]

@@ -1,20 +1,19 @@
 // Copyright 2018 the Deno authors. All rights reserved. MIT license.
-
 import { Reader, Writer, Closer, ReadResult } from "./io";
 import * as dispatch from "./dispatch";
 import * as msg from "gen/msg_generated";
 import { assert } from "./util";
-import { flatbuffers } from "flatbuffers";
+import * as flatbuffers from "./flatbuffers";
 
 /** The Deno abstraction for reading and writing files. */
 export class File implements Reader, Writer, Closer {
   constructor(readonly rid: number) {}
 
-  write(p: ArrayBufferView): Promise<number> {
+  write(p: Uint8Array): Promise<number> {
     return write(this.rid, p);
   }
 
-  read(p: ArrayBufferView): Promise<ReadResult> {
+  read(p: Uint8Array): Promise<ReadResult> {
     return read(this.rid, p);
   }
 
@@ -51,7 +50,7 @@ export async function open(
   filename: string,
   mode: OpenMode = "r"
 ): Promise<File> {
-  const builder = new flatbuffers.Builder();
+  const builder = flatbuffers.createBuilder();
   const filename_ = builder.createString(filename);
   msg.Open.startOpen(builder);
   msg.Open.addFilename(builder, filename_);
@@ -69,11 +68,8 @@ export async function open(
  *
  * Resolves with the `ReadResult` for the operation.
  */
-export async function read(
-  rid: number,
-  p: ArrayBufferView
-): Promise<ReadResult> {
-  const builder = new flatbuffers.Builder();
+export async function read(rid: number, p: Uint8Array): Promise<ReadResult> {
+  const builder = flatbuffers.createBuilder();
   msg.Read.startRead(builder);
   msg.Read.addRid(builder, rid);
   const inner = msg.Read.endRead(builder);
@@ -89,8 +85,8 @@ export async function read(
  *
  * Resolves with the number of bytes written.
  */
-export async function write(rid: number, p: ArrayBufferView): Promise<number> {
-  const builder = new flatbuffers.Builder();
+export async function write(rid: number, p: Uint8Array): Promise<number> {
+  const builder = flatbuffers.createBuilder();
   msg.Write.startWrite(builder);
   msg.Write.addRid(builder, rid);
   const inner = msg.Write.endWrite(builder);
@@ -104,7 +100,7 @@ export async function write(rid: number, p: ArrayBufferView): Promise<number> {
 
 /** Close the file ID. */
 export function close(rid: number): void {
-  const builder = new flatbuffers.Builder();
+  const builder = flatbuffers.createBuilder();
   msg.Close.startClose(builder);
   msg.Close.addRid(builder, rid);
   const inner = msg.Close.endClose(builder);

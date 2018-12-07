@@ -1,5 +1,4 @@
 // Copyright 2018 the Deno authors. All rights reserved. MIT license.
-
 import * as deno from "deno";
 import { test, assert, assertEqual } from "./test_util.ts";
 
@@ -17,4 +16,16 @@ test(async function filesCopyToStdout() {
   const fileSize = deno.statSync(filename).len;
   assertEqual(bytesWritten, fileSize);
   console.log("bytes written", bytesWritten);
+});
+
+test(async function filesToAsyncIterator() {
+  const filename = "tests/hello.txt";
+  const file = await deno.open(filename);
+
+  let totalSize = 0;
+  for await (const buf of deno.toAsyncIterator(file)) {
+    totalSize += buf.byteLength;
+  }
+
+  assertEqual(totalSize, 12);
 });

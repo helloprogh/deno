@@ -26,16 +26,6 @@ testPerm({ net: true }, async function fetchHeaders() {
   assert(headers.get("Server").startsWith("SimpleHTTP"));
 });
 
-test(async function headersAppend() {
-  let err;
-  try {
-    const headers = new Headers([["foo", "bar", "baz"]]);
-  } catch (e) {
-    err = e;
-  }
-  assert(err instanceof TypeError);
-});
-
 testPerm({ net: true }, async function fetchBlob() {
   const response = await fetch("http://localhost:4545/package.json");
   const headers = response.headers;
@@ -44,131 +34,128 @@ testPerm({ net: true }, async function fetchBlob() {
   assertEqual(blob.size, Number(headers.get("Content-Length")));
 });
 
-// Logic heavily copied from web-platform-tests, make
-// sure pass mostly header basic test
-/* tslint:disable-next-line:max-line-length */
-// ref: https://github.com/web-platform-tests/wpt/blob/7c50c216081d6ea3c9afe553ee7b64534020a1b2/fetch/api/headers/headers-basic.html
-/* tslint:disable:no-unused-expression */
-test(function newHeaderTest() {
-  new Headers();
-  new Headers(undefined);
-  new Headers({});
-  try {
-    new Headers(null);
-  } catch (e) {
-    assertEqual(e.message, "Failed to construct 'Headers': Invalid value");
-  }
-
-  try {
-    const init = [["a", "b", "c"]];
-    new Headers(init);
-  } catch (e) {
-    assertEqual(e.message, "Failed to construct 'Headers': Invalid value");
+testPerm({ net: true }, async function responseClone() {
+  const response = await fetch("http://localhost:4545/package.json");
+  const response1 = response.clone();
+  assert(response !== response1);
+  assertEqual(response.status, response1.status);
+  assertEqual(response.statusText, response1.statusText);
+  const ab = await response.arrayBuffer();
+  const ab1 = await response1.arrayBuffer();
+  for (let i = 0; i < ab.byteLength; i++) {
+    assertEqual(ab[i], ab1[i]);
   }
 });
 
-const headerDict = {
-  name1: "value1",
-  name2: "value2",
-  name3: "value3",
-  name4: undefined,
-  "Content-Type": "value4"
-};
-const headerSeq = [];
-for (const name in headerDict) {
-  headerSeq.push([name, headerDict[name]]);
+// TODO(ry) The following tests work but are flaky. There's a race condition
+// somewhere. Here is what one of these flaky failures looks like:
+//
+// test fetchPostBodyString_permW0N1E0R0
+// assertEqual failed. actual =   expected = POST /blah HTTP/1.1
+// hello: World
+// foo: Bar
+// host: 127.0.0.1:4502
+// content-length: 11
+// hello world
+// Error: actual:  expected: POST /blah HTTP/1.1
+// hello: World
+// foo: Bar
+// host: 127.0.0.1:4502
+// content-length: 11
+// hello world
+//     at Object.assertEqual (file:///C:/deno/js/testing/util.ts:29:11)
+//     at fetchPostBodyString (file
+
+/* 
+function bufferServer(addr: string): deno.Buffer {
+  const listener = deno.listen("tcp", addr);
+  const buf = new deno.Buffer();
+  listener.accept().then(async conn => {
+    const p1 = buf.readFrom(conn);
+    const p2 = conn.write(
+      new TextEncoder().encode(
+        "HTTP/1.0 404 Not Found\r\nContent-Length: 2\r\n\r\nNF"
+      )
+    );
+    // Wait for both an EOF on the read side of the socket and for the write to
+    // complete before closing it. Due to keep-alive, the EOF won't be sent
+    // until the Connection close (HTTP/1.0) response, so readFrom() can't
+    // proceed write. Conversely, if readFrom() is async, waiting for the
+    // write() to complete is not a guarantee that we've read the incoming
+    // request.
+    await Promise.all([p1, p2]);
+    conn.close();
+    listener.close();
+  });
+  return buf;
 }
 
-test(function newHeaderWithSequence() {
-  const headers = new Headers(headerSeq);
-  for (const name in headerDict) {
-    assertEqual(headers.get(name), String(headerDict[name]));
-  }
-  assertEqual(headers.get("length"), null);
-});
-
-test(function newHeaderWithRecord() {
-  const headers = new Headers(headerDict);
-  for (const name in headerDict) {
-    assertEqual(headers.get(name), String(headerDict[name]));
-  }
-});
-
-test(function newHeaderWithHeadersInstance() {
-  const headers = new Headers(headerDict);
-  const headers2 = new Headers(headers);
-  for (const name in headerDict) {
-    assertEqual(headers2.get(name), String(headerDict[name]));
-  }
-});
-
-test(function headerAppendSuccess() {
-  const headers = new Headers();
-  for (const name in headerDict) {
-    headers.append(name, headerDict[name]);
-    assertEqual(headers.get(name), String(headerDict[name]));
-  }
-});
-
-test(function headerSetSuccess() {
-  const headers = new Headers();
-  for (const name in headerDict) {
-    headers.set(name, headerDict[name]);
-    assertEqual(headers.get(name), String(headerDict[name]));
-  }
-});
-
-test(function headerHasSuccess() {
-  const headers = new Headers(headerDict);
-  for (const name in headerDict) {
-    assert(headers.has(name), "headers has name " + name);
-    /* tslint:disable-next-line:max-line-length */
-    assert(
-      !headers.has("nameNotInHeaders"),
-      "headers do not have header: nameNotInHeaders"
-    );
-  }
-});
-
-test(function headerDeleteSuccess() {
-  const headers = new Headers(headerDict);
-  for (const name in headerDict) {
-    assert(headers.has(name), "headers have a header: " + name);
-    headers.delete(name);
-    assert(!headers.has(name), "headers do not have anymore a header: " + name);
-  }
-});
-
-test(function headerGetSuccess() {
-  const headers = new Headers(headerDict);
-  for (const name in headerDict) {
-    assertEqual(headers.get(name), String(headerDict[name]));
-    assertEqual(headers.get("nameNotInHeaders"), null);
-  }
-});
-
-const headerEntriesDict = {
-  name1: "value1",
-  Name2: "value2",
-  name: "value3",
-  "content-Type": "value4",
-  "Content-Typ": "value5",
-  "Content-Types": "value6"
-};
-
-test(function headerForEachSuccess() {
-  const headers = new Headers(headerEntriesDict);
-  const keys = Object.keys(headerEntriesDict);
-  keys.forEach(key => {
-    const value = headerEntriesDict[key];
-    const newkey = key.toLowerCase();
-    headerEntriesDict[newkey] = value;
+testPerm({ net: true }, async function fetchRequest() {
+  const addr = "127.0.0.1:4501";
+  const buf = bufferServer(addr);
+  const response = await fetch(`http://${addr}/blah`, {
+    method: "POST",
+    headers: [["Hello", "World"], ["Foo", "Bar"]]
   });
-  let callNum = 0;
-  headers.forEach((value, key, container) => {
-    assertEqual(headers, container);
-    assertEqual(value, headerEntriesDict[key]);
-    callNum++;
-  });
-  assertEqual(callNum, keys.length);
+  assertEqual(response.status, 404);
+  assertEqual(response.headers.get("Content-Length"), "2");
+
+  const actual = new TextDecoder().decode(buf.bytes());
+  const expected = [
+    "POST /blah HTTP/1.1\r\n",
+    "hello: World\r\n",
+    "foo: Bar\r\n",
+    `host: ${addr}\r\n\r\n`
+  ].join("");
+  assertEqual(actual, expected);
 });
+
+testPerm({ net: true }, async function fetchPostBodyString() {
+  const addr = "127.0.0.1:4502";
+  const buf = bufferServer(addr);
+  const body = "hello world";
+  const response = await fetch(`http://${addr}/blah`, {
+    method: "POST",
+    headers: [["Hello", "World"], ["Foo", "Bar"]],
+    body
+  });
+  assertEqual(response.status, 404);
+  assertEqual(response.headers.get("Content-Length"), "2");
+
+  const actual = new TextDecoder().decode(buf.bytes());
+  const expected = [
+    "POST /blah HTTP/1.1\r\n",
+    "hello: World\r\n",
+    "foo: Bar\r\n",
+    `host: ${addr}\r\n`,
+    `content-length: ${body.length}\r\n\r\n`,
+    body
+  ].join("");
+  assertEqual(actual, expected);
+});
+
+testPerm({ net: true }, async function fetchPostBodyTypedArray() {
+  const addr = "127.0.0.1:4503";
+  const buf = bufferServer(addr);
+  const bodyStr = "hello world";
+  const body = new TextEncoder().encode(bodyStr);
+  const response = await fetch(`http://${addr}/blah`, {
+    method: "POST",
+    headers: [["Hello", "World"], ["Foo", "Bar"]],
+    body
+  });
+  assertEqual(response.status, 404);
+  assertEqual(response.headers.get("Content-Length"), "2");
+
+  const actual = new TextDecoder().decode(buf.bytes());
+  const expected = [
+    "POST /blah HTTP/1.1\r\n",
+    "hello: World\r\n",
+    "foo: Bar\r\n",
+    `host: ${addr}\r\n`,
+    `content-length: ${body.byteLength}\r\n\r\n`,
+    bodyStr
+  ].join("");
+  assertEqual(actual, expected);
+});
+*/

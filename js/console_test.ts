@@ -1,5 +1,4 @@
 // Copyright 2018 the Deno authors. All rights reserved. MIT license.
-
 import { test, assert, assertEqual } from "./test_util.ts";
 import { stringifyArgs } from "./console.ts";
 
@@ -71,6 +70,7 @@ test(function consoleTestStringifyCircular() {
   const nestedObjExpected = `{ num: 1, bool: true, str: "a", method: [Function: method], asyncMethod: [AsyncFunction: asyncMethod], generatorMethod: [GeneratorFunction: generatorMethod], un: undefined, nu: null, arrowFunc: [Function: arrowFunc], extendedClass: Extended { a: 1, b: 2 }, nFunc: [Function], extendedCstr: [Function: Extended], o: { num: 2, bool: false, str: "b", method: [Function: method], un: undefined, nu: null, nested: [Circular], emptyObj: [object], arr: [object], baseClass: [object] } }`;
 
   assertEqual(stringify(1), "1");
+  assertEqual(stringify(1n), "1n");
   assertEqual(stringify("s"), "s");
   assertEqual(stringify(false), "false");
   assertEqual(stringify(Symbol(1)), "Symbol(1)");

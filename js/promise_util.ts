@@ -1,3 +1,4 @@
+// Copyright 2018 the Deno authors. All rights reserved. MIT license.
 import { PromiseRejectEvent } from "./libdeno";
 
 /* tslint:disable-next-line:no-any */
@@ -20,6 +21,9 @@ export function promiseRejectHandler(
       break;
     case "HandlerAddedAfterReject":
       rejectMap.delete(promise);
+      break;
+    case "ResolveAfterResolved":
+      // Should not warn. See #1272
       break;
     default:
       // error is string here
