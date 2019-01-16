@@ -10,13 +10,16 @@
 import * as blob from "./blob";
 import * as consoleTypes from "./console";
 import * as domTypes from "./dom_types";
-import * as file from "./file";
+import * as event from "./event";
+import * as eventTarget from "./event_target";
 import * as formData from "./form_data";
 import * as fetchTypes from "./fetch";
 import * as headers from "./headers";
 import * as textEncoding from "./text_encoding";
 import * as timers from "./timers";
+import * as url from "./url";
 import * as urlSearchParams from "./url_search_params";
+import * as workers from "./workers";
 
 // These imports are not exposed and therefore are fine to just import the
 // symbols required.
@@ -54,8 +57,21 @@ window.setInterval = timers.setInterval;
 // being used, which it cannot statically determine within this module.
 window.Blob = blob.DenoBlob;
 export type Blob = blob.DenoBlob;
-window.File = file.DenoFile;
-export type File = file.DenoFile;
+
+// TODO(ry) Do not export a class implementing the DOM, export the DOM
+// interface. See this comment for implementation hint:
+// https://github.com/denoland/deno/pull/1396#discussion_r243711502
+// window.File = file.DenoFile;
+// export type File = file.DenoFile;
+
+window.EventInit = event.EventInit;
+export type EventInit = event.EventInit;
+window.Event = event.Event;
+export type Event = event.Event;
+window.EventTarget = eventTarget.EventTarget;
+export type EventTarget = eventTarget.EventTarget;
+window.URL = url.URL;
+export type URL = url.URL;
 window.URLSearchParams = urlSearchParams.URLSearchParams;
 export type URLSearchParams = urlSearchParams.URLSearchParams;
 
@@ -71,3 +87,8 @@ window.TextEncoder = textEncoding.TextEncoder;
 export type TextEncoder = textEncoding.TextEncoder;
 window.TextDecoder = textEncoding.TextDecoder;
 export type TextDecoder = textEncoding.TextDecoder;
+
+window.workerMain = workers.workerMain;
+// TODO These shouldn't be available in main isolate.
+window.postMessage = workers.postMessage;
+window.close = workers.workerClose;

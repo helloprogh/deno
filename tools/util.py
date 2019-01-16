@@ -12,6 +12,7 @@ FG_GREEN = "\x1b[32m"
 
 executable_suffix = ".exe" if os.name == "nt" else ""
 root_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+tests_path = os.path.join(root_path, "tests")
 
 
 def make_env(merge_env=None, env=None):
@@ -92,6 +93,8 @@ def green_ok():
 
 
 def remove_and_symlink(target, name, target_is_dir=False):
+    if os.name != "nt" and os.path.islink(name):
+        return
     try:
         # On Windows, directory symlink can only be removed with rmdir().
         if os.name == "nt" and os.path.isdir(name):

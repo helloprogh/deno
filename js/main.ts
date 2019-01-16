@@ -1,77 +1,82 @@
-// Copyright 2018 the Deno authors. All rights reserved. MIT license.
-// We need to make sure this module loads, for its side effects.
-import "./globals";
+// Copyright 2018-2019 the Deno authors. All rights reserved. MIT license.
+import { window } from "./globals";
 
 import * as flatbuffers from "./flatbuffers";
 import * as msg from "gen/msg_generated";
 import { assert, log, setLogDebug } from "./util";
 import * as os from "./os";
 import { Compiler } from "./compiler";
-import { Runner } from "./runner";
 import { libdeno } from "./libdeno";
 import { args } from "./deno";
 import { sendSync, handleAsyncMsgFromRust } from "./dispatch";
-import { promiseErrorExaminer, promiseRejectHandler } from "./promise_util";
 import { replLoop } from "./repl";
-import * as sourceMaps from "./v8_source_maps";
 import { version } from "typescript";
+import { postMessage } from "./workers";
+import { TextDecoder, TextEncoder } from "./text_encoding";
+import { ModuleSpecifier, ContainingFile } from "./compiler";
 
-// Install the source maps handler and do some pre-calculations so all of it is
-// available in the snapshot
-const compiler = Compiler.instance();
-sourceMaps.install({
-  installPrepareStackTrace: true,
-  getGeneratedContents: compiler.getGeneratedContents
-});
-const consumer = sourceMaps.loadConsumer("gen/bundle/main.js");
-assert(consumer != null);
-consumer!.computeColumnSpans();
+// builtin modules
+import * as deno from "./deno";
 
-function sendStart(): msg.StartRes {
+type CompilerLookup = { specifier: ModuleSpecifier; referrer: ContainingFile };
+
+// Global reference to StartRes so it can be shared between compilerMain and
+// denoMain.
+let startResMsg: msg.StartRes;
+
+function sendStart(): void {
   const builder = flatbuffers.createBuilder();
   msg.Start.startStart(builder);
   const startOffset = msg.Start.endStart(builder);
   const baseRes = sendSync(builder, msg.Any.Start, startOffset);
   assert(baseRes != null);
   assert(msg.Any.StartRes === baseRes!.innerType());
-  const startRes = new msg.StartRes();
-  assert(baseRes!.inner(startRes) != null);
-  return startRes;
+  startResMsg = new msg.StartRes();
+  assert(baseRes!.inner(startResMsg) != null);
 }
 
-function onGlobalError(
-  message: string,
-  source: string,
-  lineno: number,
-  colno: number,
-  error: any // tslint:disable-line:no-any
-) {
-  if (error instanceof Error) {
-    console.log(error.stack);
-  } else {
-    console.log(`Thrown: ${String(error)}`);
-  }
-  os.exit(1);
+function compilerMain() {
+  // workerMain should have already been called since a compiler is a worker.
+  const compiler = Compiler.instance();
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  compiler.recompile = startResMsg.recompileFlag();
+  log(`recompile ${compiler.recompile}`);
+  window.onmessage = ({ data }: { data: Uint8Array }) => {
+    const json = decoder.decode(data);
+    const lookup = JSON.parse(json) as CompilerLookup;
+
+    const moduleMetaData = compiler.compile(lookup.specifier, lookup.referrer);
+
+    const responseJson = JSON.stringify(moduleMetaData);
+    const response = encoder.encode(responseJson);
+    postMessage(response);
+  };
 }
+window["compilerMain"] = compilerMain;
 
 /* tslint:disable-next-line:no-default-export */
 export default function denoMain() {
   libdeno.recv(handleAsyncMsgFromRust);
-  libdeno.setGlobalErrorHandler(onGlobalError);
-  libdeno.setPromiseRejectHandler(promiseRejectHandler);
-  libdeno.setPromiseErrorExaminer(promiseErrorExaminer);
+
+  libdeno.builtinModules["deno"] = deno;
+  // libdeno.builtinModules["typescript"] = typescript;
+  Object.freeze(libdeno.builtinModules);
 
   // First we send an empty "Start" message to let the privileged side know we
   // are ready. The response should be a "StartRes" message containing the CLI
   // args and other info.
-  const startResMsg = sendStart();
+  sendStart();
 
   setLogDebug(startResMsg.debugFlag());
 
   // handle `--types`
+  // TODO(kitsonk) move to Rust fetching from compiler
   if (startResMsg.typesFlag()) {
+    const compiler = Compiler.instance();
     const defaultLibFileName = compiler.getDefaultLibFileName();
-    console.log(compiler.getSource(defaultLibFileName));
+    const defaultLibModule = compiler.resolveModule(defaultLibFileName, "");
+    console.log(defaultLibModule.sourceCode);
     os.exit(0);
   }
 
@@ -83,6 +88,8 @@ export default function denoMain() {
     os.exit(0);
   }
 
+  os.setPid(startResMsg.pid());
+
   const cwd = startResMsg.cwd();
   log("cwd", cwd);
 
@@ -91,14 +98,9 @@ export default function denoMain() {
   }
   log("args", args);
   Object.freeze(args);
+
   const inputFn = args[0];
-
-  compiler.recompile = startResMsg.recompileFlag();
-  const runner = new Runner(compiler);
-
-  if (inputFn) {
-    runner.run(inputFn, `${cwd}/`);
-  } else {
+  if (!inputFn) {
     replLoop();
   }
 }

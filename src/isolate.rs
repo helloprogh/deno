@@ -1,17 +1,23 @@
-// Copyright 2018 the Deno authors. All rights reserved. MIT license.
-
+// Copyright 2018-2019 the Deno authors. All rights reserved. MIT license.
 // Do not use FlatBuffers in this module.
 // TODO Currently this module uses Tokio, but it would be nice if they were
 // decoupled.
 
-use deno_dir;
-use errors::DenoError;
-use errors::DenoResult;
-use flags;
-use libdeno;
-use permissions::DenoPermissions;
+use crate::compiler::compile_sync;
+use crate::compiler::CodeFetchOutput;
+use crate::deno_dir;
+use crate::errors::DenoError;
+use crate::errors::DenoResult;
+use crate::flags;
+use crate::js_errors::JSError;
+use crate::libdeno;
+use crate::msg;
+use crate::permissions::DenoPermissions;
+use crate::tokio_util;
 
+use futures::sync::mpsc as async_mpsc;
 use futures::Future;
+use libc::c_char;
 use libc::c_void;
 use std;
 use std::cell::Cell;
@@ -21,12 +27,10 @@ use std::ffi::CString;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 use tokio;
-use tokio_util;
-
-type DenoException<'a> = &'a str;
 
 // Buf represents a byte array returned from a "Op".
 // The message might be empty (which will be translated into a null object on
@@ -36,7 +40,7 @@ pub type Buf = Box<[u8]>;
 
 // JS promises in Deno map onto a specific Future
 // which yields either a DenoError or a byte array.
-pub type Op = Future<Item = Buf, Error = DenoError> + Send;
+pub type Op = dyn Future<Item = Buf, Error = DenoError> + Send;
 
 // Returns (is_sync, op)
 pub type Dispatch =
@@ -53,6 +57,10 @@ pub struct Isolate {
   pub state: Arc<IsolateState>,
 }
 
+pub type WorkerSender = async_mpsc::Sender<Buf>;
+pub type WorkerReceiver = async_mpsc::Receiver<Buf>;
+pub type WorkerChannels = (WorkerSender, WorkerReceiver);
+
 // Isolate cannot be passed between threads but IsolateState can.
 // IsolateState satisfies Send and Sync.
 // So any state that needs to be accessed outside the main V8 thread should be
@@ -64,18 +72,33 @@ pub struct IsolateState {
   pub permissions: DenoPermissions,
   pub flags: flags::DenoFlags,
   pub metrics: Metrics,
+  pub worker_channels: Option<Mutex<WorkerChannels>>,
 }
 
 impl IsolateState {
-  pub fn new(flags: flags::DenoFlags, argv_rest: Vec<String>) -> Self {
+  pub fn new(
+    flags: flags::DenoFlags,
+    argv_rest: Vec<String>,
+    worker_channels: Option<WorkerChannels>,
+  ) -> Self {
     let custom_root = env::var("DENO_DIR").map(|s| s.into()).ok();
+
     Self {
       dir: deno_dir::DenoDir::new(flags.reload, custom_root).unwrap(),
       argv: argv_rest,
       permissions: DenoPermissions::new(&flags),
       flags,
       metrics: Metrics::default(),
+      worker_channels: worker_channels.map(Mutex::new),
     }
+  }
+
+  #[cfg(test)]
+  pub fn mock() -> Arc<IsolateState> {
+    let argv = vec![String::from("./deno"), String::from("hello.js")];
+    // For debugging: argv.push_back(String::from("-D"));
+    let (flags, rest_argv, _) = flags::set_flags(argv).unwrap();
+    Arc::new(IsolateState::new(flags, rest_argv, None))
   }
 
   #[inline]
@@ -145,10 +168,13 @@ impl Isolate {
       unsafe { libdeno::deno_init() };
     });
     let config = libdeno::deno_config {
+      will_snapshot: 0,
+      load_snapshot: snapshot,
       shared: libdeno::deno_buf::empty(), // TODO Use for message passing.
       recv_cb: pre_dispatch,
+      resolve_cb,
     };
-    let libdeno_isolate = unsafe { libdeno::deno_new(snapshot, config) };
+    let libdeno_isolate = unsafe { libdeno::deno_new(config) };
     // This channel handles sending async messages back to the runtime.
     let (tx, rx) = mpsc::channel::<(i32, Buf)>();
 
@@ -184,11 +210,32 @@ impl Isolate {
     self.timeout_due.set(inst);
   }
 
-  pub fn execute(
+  pub fn last_exception(&self) -> Option<JSError> {
+    let ptr = unsafe { libdeno::deno_last_exception(self.libdeno_isolate) };
+    if ptr.is_null() {
+      None
+    } else {
+      let cstr = unsafe { CStr::from_ptr(ptr) };
+      let v8_exception = cstr.to_str().unwrap();
+      debug!("v8_exception\n{}\n", v8_exception);
+      let js_error = JSError::from_v8_exception(v8_exception).unwrap();
+      let js_error_mapped = js_error.apply_source_map(&self.state.dir);
+      Some(js_error_mapped)
+    }
+  }
+
+  /// Same as execute2() but the filename defaults to "<anonymous>".
+  pub fn execute(&self, js_source: &str) -> Result<(), JSError> {
+    self.execute2("<anonymous>", js_source)
+  }
+
+  /// Executes the provided JavaScript source code. The js_filename argument is
+  /// provided only for debugging purposes.
+  pub fn execute2(
     &self,
     js_filename: &str,
     js_source: &str,
-  ) -> Result<(), DenoException> {
+  ) -> Result<(), JSError> {
     let filename = CString::new(js_filename).unwrap();
     let source = CString::new(js_source).unwrap();
     let r = unsafe {
@@ -200,9 +247,40 @@ impl Isolate {
       )
     };
     if r == 0 {
-      let ptr = unsafe { libdeno::deno_last_exception(self.libdeno_isolate) };
-      let cstr = unsafe { CStr::from_ptr(ptr) };
-      return Err(cstr.to_str().unwrap());
+      let js_error = self.last_exception().unwrap();
+      return Err(js_error);
+    }
+    Ok(())
+  }
+
+  /// Executes the provided JavaScript module.
+  pub fn execute_mod(
+    &self,
+    js_filename: &str,
+    is_prefetch: bool,
+  ) -> Result<(), JSError> {
+    let out =
+      code_fetch_and_maybe_compile(&self.state, js_filename, ".").unwrap();
+
+    let filename = CString::new(out.filename.clone()).unwrap();
+    let filename_ptr = filename.as_ptr() as *const i8;
+
+    let js_source = CString::new(out.js_source().clone()).unwrap();
+    let js_source = CString::new(js_source).unwrap();
+    let js_source_ptr = js_source.as_ptr() as *const i8;
+
+    let r = unsafe {
+      libdeno::deno_execute_mod(
+        self.libdeno_isolate,
+        self.as_raw_ptr(),
+        filename_ptr,
+        js_source_ptr,
+        if is_prefetch { 1 } else { 0 },
+      )
+    };
+    if r == 0 {
+      let js_error = self.last_exception().unwrap();
+      return Err(js_error);
     }
     Ok(())
   }
@@ -249,7 +327,7 @@ impl Isolate {
 
   // TODO Use Park abstraction? Note at time of writing Tokio default runtime
   // does not have new_with_park().
-  pub fn event_loop(&self) {
+  pub fn event_loop(&self) -> Result<(), JSError> {
     // Main thread event loop.
     while !self.is_idle() {
       match recv_deadline(&self.rx, self.get_timeout_due()) {
@@ -258,9 +336,16 @@ impl Isolate {
         Err(e) => panic!("recv_deadline() failed: {:?}", e),
       }
       self.check_promise_errors();
+      if let Some(err) = self.last_exception() {
+        return Err(err);
+      }
     }
     // Check on done
     self.check_promise_errors();
+    if let Some(err) = self.last_exception() {
+      return Err(err);
+    }
+    Ok(())
   }
 
   #[inline]
@@ -285,6 +370,55 @@ impl Drop for Isolate {
   fn drop(&mut self) {
     unsafe { libdeno::deno_delete(self.libdeno_isolate) }
   }
+}
+
+fn code_fetch_and_maybe_compile(
+  state: &Arc<IsolateState>,
+  specifier: &str,
+  referrer: &str,
+) -> Result<CodeFetchOutput, DenoError> {
+  let mut out = state.dir.code_fetch(specifier, referrer)?;
+  if (out.media_type == msg::MediaType::TypeScript
+    && out.maybe_output_code.is_none())
+    || state.flags.recompile
+  {
+    debug!(">>>>> compile_sync START");
+    out = compile_sync(state, specifier, &referrer).unwrap();
+    debug!(">>>>> compile_sync END");
+  }
+  Ok(out)
+}
+
+extern "C" fn resolve_cb(
+  user_data: *mut c_void,
+  specifier_ptr: *const c_char,
+  referrer_ptr: *const c_char,
+) {
+  let specifier_c: &CStr = unsafe { CStr::from_ptr(specifier_ptr) };
+  let specifier: &str = specifier_c.to_str().unwrap();
+
+  let referrer_c: &CStr = unsafe { CStr::from_ptr(referrer_ptr) };
+  let referrer: &str = referrer_c.to_str().unwrap();
+
+  debug!("module_resolve callback {} {}", specifier, referrer);
+  let isolate = unsafe { Isolate::from_raw_ptr(user_data) };
+
+  let out =
+    code_fetch_and_maybe_compile(&isolate.state, specifier, referrer).unwrap();
+
+  let filename = CString::new(out.filename.clone()).unwrap();
+  let filename_ptr = filename.as_ptr() as *const i8;
+
+  let js_source = CString::new(out.js_source().clone()).unwrap();
+  let js_source_ptr = js_source.as_ptr() as *const i8;
+
+  unsafe {
+    libdeno::deno_resolve_ok(
+      isolate.libdeno_isolate,
+      filename_ptr,
+      js_source_ptr,
+    )
+  };
 }
 
 // Dereferences the C pointer into the Rust Isolate object.
@@ -368,16 +502,12 @@ mod tests {
 
   #[test]
   fn test_dispatch_sync() {
-    let argv = vec![String::from("./deno"), String::from("hello.js")];
-    let (flags, rest_argv, _) = flags::set_flags(argv).unwrap();
-
-    let state = Arc::new(IsolateState::new(flags, rest_argv));
+    let state = IsolateState::mock();
     let snapshot = libdeno::deno_buf::empty();
     let isolate = Isolate::new(snapshot, state, dispatch_sync);
     tokio_util::init(|| {
       isolate
         .execute(
-          "y.js",
           r#"
           const m = new Uint8Array([4, 5, 6]);
           let n = libdeno.send(m);
@@ -389,7 +519,7 @@ mod tests {
           }
         "#,
         ).expect("execute error");
-      isolate.event_loop();
+      isolate.event_loop().ok();
     });
   }
 
@@ -411,9 +541,7 @@ mod tests {
 
   #[test]
   fn test_metrics_sync() {
-    let argv = vec![String::from("./deno"), String::from("hello.js")];
-    let (flags, rest_argv, _) = flags::set_flags(argv).unwrap();
-    let state = Arc::new(IsolateState::new(flags, rest_argv));
+    let state = IsolateState::mock();
     let snapshot = libdeno::deno_buf::empty();
     let isolate = Isolate::new(snapshot, state, metrics_dispatch_sync);
     tokio_util::init(|| {
@@ -429,14 +557,13 @@ mod tests {
 
       isolate
         .execute(
-          "y.js",
           r#"
           const control = new Uint8Array([4, 5, 6]);
           const data = new Uint8Array([42, 43, 44, 45, 46]);
           libdeno.send(control, data);
         "#,
-        ).expect("execute error");
-      isolate.event_loop();
+        ).expect("execute error");;
+      isolate.event_loop().unwrap();
       let metrics = &isolate.state.metrics;
       assert_eq!(metrics.ops_dispatched.load(Ordering::SeqCst), 1);
       assert_eq!(metrics.ops_completed.load(Ordering::SeqCst), 1);
@@ -448,9 +575,7 @@ mod tests {
 
   #[test]
   fn test_metrics_async() {
-    let argv = vec![String::from("./deno"), String::from("hello.js")];
-    let (flags, rest_argv, _) = flags::set_flags(argv).unwrap();
-    let state = Arc::new(IsolateState::new(flags, rest_argv));
+    let state = IsolateState::mock();
     let snapshot = libdeno::deno_buf::empty();
     let isolate = Isolate::new(snapshot, state, metrics_dispatch_async);
     tokio_util::init(|| {
@@ -466,11 +591,11 @@ mod tests {
 
       isolate
         .execute(
-          "y.js",
           r#"
           const control = new Uint8Array([4, 5, 6]);
           const data = new Uint8Array([42, 43, 44, 45, 46]);
           let r = libdeno.send(control, data);
+          libdeno.recv(() => {});
           if (r != null) throw Error("expected null");
         "#,
         ).expect("execute error");
@@ -486,7 +611,7 @@ mod tests {
         // with metrics_dispatch_async() to properly validate them.
       }
 
-      isolate.event_loop();
+      isolate.event_loop().unwrap();
 
       // Make sure relevant metrics are updated after task is executed.
       {
@@ -520,5 +645,32 @@ mod tests {
     let vec: Box<[u8]> = vec![1, 2, 3, 4].into_boxed_slice();
     let op = Box::new(futures::future::ok(vec));
     (false, op)
+  }
+
+  #[test]
+  fn thread_safety() {
+    fn is_thread_safe<T: Sync + Send>() {}
+    is_thread_safe::<IsolateState>();
+  }
+
+  #[test]
+  fn execute_mod() {
+    let filename = std::env::current_dir()
+      .unwrap()
+      .join("tests/esm_imports_a.js");
+    let filename = filename.to_str().unwrap();
+
+    let argv = vec![String::from("./deno"), String::from(filename)];
+    let (flags, rest_argv, _) = flags::set_flags(argv).unwrap();
+
+    let state = Arc::new(IsolateState::new(flags, rest_argv, None));
+    let snapshot = libdeno::deno_buf::empty();
+    let isolate = Isolate::new(snapshot, state, dispatch_sync);
+    tokio_util::init(|| {
+      isolate
+        .execute_mod(filename, false)
+        .expect("execute_mod error");
+      isolate.event_loop().ok();
+    });
   }
 }

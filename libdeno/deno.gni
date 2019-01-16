@@ -1,11 +1,6 @@
 # Copyright 2018 the Deno authors. All rights reserved. MIT license.
 import("//build/compiled_action.gni")
 
-declare_args() {
-  # Use prebuilt V8 libraries from //prebuilt/
-  use_prebuilt_v8 = true
-}
-
 template("run_node") {
   action(target_name) {
     forward_variables_from(invoker, "*")
@@ -25,14 +20,9 @@ template("snapshot") {
     visibility = [ ":*" ]  # Only targets in this file can depend on this.
     snapshot_out_bin = "$target_gen_dir/$target_name.bin"
     inputs = [
-      invoker.js,
+      invoker.source_root,
     ]
 
-    # TODO(ry) source_map should not be involved at this layer. Remove the
-    # following.
-    if (defined(invoker.source_map)) {
-      inputs += [ invoker.source_map ]
-    }
     outputs = [
       snapshot_out_bin,
     ]

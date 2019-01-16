@@ -11,10 +11,7 @@ import os
 import re
 import sys
 import subprocess
-from util import pattern_match, green_ok, red_failed
-
-root_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-tests_path = os.path.join(root_path, "tests")
+from util import root_path, tests_path, pattern_match, green_ok, red_failed
 
 
 def read_test(file_name):
@@ -26,6 +23,15 @@ def read_test(file_name):
         key, value = re.split(r":\s+", line)
         test_dict[key] = value
     return test_dict
+
+
+def str2bool(v):
+    if v == "true":
+        return True
+    elif v == "false":
+        return False
+    else:
+        raise ValueError("Bad boolean value")
 
 
 def integration_tests(deno_executable):
@@ -40,6 +46,10 @@ def integration_tests(deno_executable):
         test = read_test(test_abs)
         exit_code = int(test.get("exit_code", 0))
         args = test.get("args", "").split(" ")
+
+        check_stderr = str2bool(test.get("check_stderr", "false"))
+        stderr = subprocess.STDOUT if check_stderr else None
+
         output_abs = os.path.join(root_path, test.get("output", ""))
         with open(output_abs, 'r') as f:
             expected_out = f.read()
@@ -48,7 +58,8 @@ def integration_tests(deno_executable):
         print " ".join(cmd)
         actual_code = 0
         try:
-            actual_out = subprocess.check_output(cmd, universal_newlines=True)
+            actual_out = subprocess.check_output(
+                cmd, universal_newlines=True, stderr=stderr)
         except subprocess.CalledProcessError as e:
             actual_code = e.returncode
             actual_out = e.output

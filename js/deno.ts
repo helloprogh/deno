@@ -1,10 +1,20 @@
-// Copyright 2018 the Deno authors. All rights reserved. MIT license.
+// Copyright 2018-2019 the Deno authors. All rights reserved. MIT license.
 
 // Public deno module.
 /// <amd-module name="deno"/>
-export { env, exit } from "./os";
+export { pid, env, exit } from "./os";
 export { chdir, cwd } from "./dir";
-export { File, open, stdin, stdout, stderr, read, write, close } from "./files";
+export {
+  File,
+  open,
+  stdin,
+  stdout,
+  stderr,
+  read,
+  write,
+  close,
+  OpenMode
+} from "./files";
 export {
   copy,
   toAsyncIterator,
@@ -42,12 +52,17 @@ export { connect, dial, listen, Listener, Conn } from "./net";
 export { metrics } from "./metrics";
 export { resources } from "./resources";
 export { run, RunOptions, Process, ProcessStatus } from "./process";
+export { inspect } from "./console";
 export const args: string[] = [];
+
+// TODO Don't expose Console nor stringifyArgs.
+export { Console, stringifyArgs } from "./console";
+// TODO Don't expose DomIterableMixin.
+export { DomIterableMixin } from "./mixins/dom_iterable";
+// TODO Don't expose deferred.
+export { deferred } from "./util";
 
 // Provide the compiler API in an obfuscated way
 import * as compiler from "./compiler";
 // @internal
 export const _compiler = compiler;
-import * as runner from "./runner";
-// @internal
-export const _runner = runner;

@@ -32,6 +32,12 @@ _Note: Depending on your security settings, you may have to run
 `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` first to allow downloaded
 scripts to be executed._
 
+With [Scoop](https://scoop.sh/):
+
+```
+scoop install deno
+```
+
 Deno can also be installed manually, by downloading a tarball or zip file at
 [github.com/denoland/deno/releases](https://github.com/denoland/deno/releases).
 These packages contain just a single executable file. You will have to set the
@@ -145,7 +151,7 @@ browser JavaScript, Deno can import libraries directly from URLs. This example
 uses a URL to import a test runner library:
 
 ```ts
-import { test, assertEqual } from "https://deno.land/x/testing/testing.ts";
+import { test, assertEqual } from "https://deno.land/x/testing/mod.ts";
 
 test(function t1() {
   assertEqual("hello", "hello");
@@ -161,10 +167,8 @@ Try running this:
 ```
 > deno https://deno.land/x/examples/example_test.ts
 Compiling /Users/rld/src/deno_examples/example_test.ts
-Downloading https://deno.land/x/testing/testing.ts
-Downloading https://deno.land/x/testing/util.ts
-Compiling https://deno.land/x/testing/testing.ts
-Compiling https://deno.land/x/testing/util.ts
+Downloading https://deno.land/x/testing/mod.ts
+Compiling https://deno.land/x/testing/mod.ts
 running 2 tests
 test t1
 ... ok
@@ -202,11 +206,11 @@ everywhere in a large project?** The solution is to import and re-export your
 external libraries in a central `package.ts` file (which serves the same purpose
 as Node's `package.json` file). For example, let's say you were using the above
 testing library across a large project. Rather than importing
-`"https://deno.land/x/testing/testing.ts"` everywhere, you could create a
+`"https://deno.land/x/testing/mod.ts"` everywhere, you could create a
 `package.ts` file the exports the third-party code:
 
 ```ts
-export { test, assertEqual } from "https://deno.land/x/testing/testing.ts";
+export { test, assertEqual } from "https://deno.land/x/testing/mod.ts";
 ```
 
 And throughout project one can import from the `package.ts` and avoid having
@@ -230,6 +234,8 @@ are a few particularly useful ones:
 
 ## How to Profile deno
 
+To start profiling,
+
 ```sh
 # Make sure we're only building release.
 export DENO_BUILD_MODE=release
@@ -240,11 +246,64 @@ export DENO_BUILD_MODE=release
 # Exercise it.
 third_party/wrk/linux/wrk http://localhost:4500/
 kill `pgrep deno`
-# When supplying --prof, V8 will write a file in the current directory that
-# looks like this isolate-0x7fad98242400-v8.log
-# To examine this file:
+```
+
+V8 will write a file in the current directory that looks like this:
+`isolate-0x7fad98242400-v8.log`. To examine this file:
+
+```sh
 D8_PATH=target/release/ ./third_party/v8/tools/linux-tick-processor
-isolate-0x7fad98242400-v8.log
+isolate-0x7fad98242400-v8.log > prof.log
+# on macOS, use ./third_party/v8/tools/mac-tick-processor instead
+```
+
+`prof.log` will contain information about tick distribution of different calls.
+
+To view the log with Web UI, generate JSON file of the log:
+
+```sh
+D8_PATH=target/release/ ./third_party/v8/tools/linux-tick-processor
+isolate-0x7fad98242400-v8.log --preprocess > prof.json
+```
+
+Open `third_party/v8/tools/profview/index.html` in your brower, and select
+`prof.json` to view the distribution graphically.
+
+To learn more about `d8` and profiling, check out the following links:
+
+- [https://v8.dev/docs/d8](https://v8.dev/docs/d8)
+- [https://v8.dev/docs/profile](https://v8.dev/docs/profile)
+
+## How to Debug deno
+
+We can use LLDB to debug deno.
+
+```sh
+lldb -- target/debug/deno tests/worker.js
+> run
+> bt
+> up
+> up
+> l
+```
+
+To debug Rust code, we can use `rust-lldb`. It should come with `rustc` and is a
+wrapper around LLDB.
+
+```sh
+rust-lldb -- ./target/debug/deno tests/http_bench.ts --allow-net
+# On macOS, you might get warnings like
+# `ImportError: cannot import name _remove_dead_weakref`
+# In that case, use system python by setting PATH, e.g.
+# PATH=/System/Library/Frameworks/Python.framework/Versions/2.7/bin:$PATH
+(lldb) command script import "/Users/kevinqian/.rustup/toolchains/1.30.0-x86_64-apple-darwin/lib/rustlib/etc/lldb_rust_formatters.py"
+(lldb) type summary add --no-value --python-function lldb_rust_formatters.print_val -x ".*" --category Rust
+(lldb) type category enable Rust
+(lldb) target create "../deno/target/debug/deno"
+Current executable set to '../deno/target/debug/deno' (x86_64).
+(lldb) settings set -- target.run-args  "tests/http_bench.ts" "--allow-net"
+(lldb) b op_start
+(lldb) r
 ```
 
 ## Build Instructions _(for advanced users only)_
@@ -334,106 +393,14 @@ https://github.com/denoland/deno/blob/master/src/msg.fbs
 
 ### Internal: Updating prebuilt binaries
 
-V8 takes a long time to build - on the order of an hour. We use pre-built V8
-libraries stored in a Google Storage bucket instead of rebuilding it from
-scratch each time. Our build system is however setup such that we can build V8
-as part of the Deno build if necessary (useful for debugging or changing various
-configurations in V8, or building the pre-built binaries themselves). To control
-whether to use a pre-built V8 or not use the `use_v8_prebuilt` GN argument.
-
-Use `tools/gcloud_upload.py` to upload new prebuilt files.
+```
+./third_party/depot_tools/upload_to_google_storage.py -b denoland  \
+  -e ~/.config/gcloud/legacy_credentials/ry@tinyclouds.org/.boto `which sccache`
+mv `which sccache`.sha1 prebuilt/linux64/
+gsutil acl ch -u AllUsers:R gs://denoland/608be47bf01004aa11d4ed06955414e93934516e
+```
 
 ## Contributing
 
 See
 [CONTRIBUTING.md](https://github.com/denoland/deno/blob/master/.github/CONTRIBUTING.md).
-
-## Changelog
-
-### 2018.11.27 / v0.2.0 / Mildly usable
-
-[An intro talk was recorded.](https://www.youtube.com/watch?v=FlTG0UXRAkE)
-
-Stability and usability improvements. `fetch()` is 90% functional now. Basic
-REPL support was added. Shebang support was added. Command-line argument parsing
-was improved. A forwarding service `https://deno.land/x` was set up for Deno
-code. Example code has been posted to
-[deno.land/x/examples](https://github.com/denoland/deno_examples) and
-[deno.land/x/net](https://github.com/denoland/net).
-
-The resources table was added to abstract various types of I/O streams and other
-allocated state. A resource is an integer identifier which maps to some Rust
-object. It can be used with various ops, particularly read and write.
-
-### 2018.10.18 / v0.1.8 / Connecting to Tokio / Fleshing out APIs
-
-Most file system ops were implemented. Basic TCP networking is implemented.
-Basic stdio streams exposed. And many random OS facilities were exposed (e.g.
-environmental variables)
-
-Tokio was chosen as the backing event loop library. A careful mapping of JS
-Promises onto Rust Futures was made, preserving error handling and the ability
-to execute synchronously in the main thread.
-
-Continuous benchmarks were added: https://denoland.github.io/deno/ Performance
-issues are beginning to be addressed.
-
-"deno --types" was added to reference runtime APIs.
-
-Working towards https://github.com/denoland/deno/milestone/2 We expect v0.2 to
-be released in last October or early November.
-
-### 2018.09.09 / v0.1.3 / Scale binding infrastructure
-
-ETA v.0.2 October 2018 https://github.com/denoland/deno/milestone/2
-
-We decided to use Tokio https://tokio.rs/ to provide asynchronous I/O, thread
-pool execution, and as a base for high level support for various internet
-protocols like HTTP. Tokio is strongly designed around the idea of Futures -
-which map quite well onto JavaScript promises. We want to make it as easy as
-possible to start a Tokio future from JavaScript and get a Promise for handling
-it. We expect this to result in preliminary file system operations, fetch() for
-http. Additionally we are working on CI, release, and benchmarking
-infrastructure to scale development.
-
-### 2018.08.23 / v0.1.0 / Rust rewrite / V8 snapshot
-
-https://github.com/denoland/deno/commit/68d388229ea6ada339d68eb3d67feaff7a31ca97
-
-Complete! https://github.com/denoland/deno/milestone/1
-
-Go is a garbage collected language and we are worried that combining it with
-V8's GC will lead to difficult contention problems down the road.
-
-The V8Worker2 binding/concept is being ported to a new C++ library called
-libdeno. libdeno will include the entire JS runtime as a V8 snapshot. It still
-follows the message passing paradigm. Rust will be bound to this library to
-implement the privileged part of deno. See deno2/README.md for more details.
-
-V8 Snapshots allow deno to avoid recompiling the TypeScript compiler at startup.
-This is already working.
-
-When the rewrite is at feature parity with the Go prototype, we will release
-binaries for people to try.
-
-### 2018.09.32 / v0.0.0 / Golang Prototype / JSConf talk
-
-https://github.com/denoland/deno/tree/golang
-
-https://www.youtube.com/watch?v=M3BM9TB-8yA
-
-https://tinyclouds.org/jsconf2018.pdf
-
-### 2007-2017 / Prehistory
-
-https://github.com/ry/v8worker
-
-https://libuv.org/
-
-https://tinyclouds.org/iocp-links.html
-
-https://nodejs.org/
-
-https://github.com/nodejs/http-parser
-
-https://tinyclouds.org/libebb/

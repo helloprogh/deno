@@ -1,6 +1,9 @@
 union Any {
   Start,
   StartRes,
+  WorkerGetMessage,
+  WorkerGetMessageRes,
+  WorkerPostMessage,
   CodeFetch,
   CodeFetchRes,
   CodeCache,
@@ -105,6 +108,10 @@ enum ErrorKind: byte {
   HttpCanceled,
   HttpParse,
   HttpOther,
+  TooLarge,
+
+  // custom errors
+  InvalidUri,
 }
 
 table Cwd {}
@@ -120,9 +127,16 @@ enum MediaType: byte {
   Unknown
 }
 
+table Shared {
+  lock: bool;
+  head: int;
+  tail: int;
+  ring: [Base];
+}
+
 table Base {
   cmd_id: uint32;
-  sync: bool = true; // TODO(ry) Change default to false.
+  sync: bool = false;
   error_kind: ErrorKind = NoError;
   error: string;
   inner: Any;
@@ -134,6 +148,7 @@ table Start {
 
 table StartRes {
   cwd: string;
+  pid: uint32;
   argv: [string];
   debug_flag: bool;
   deps_flag: bool;
@@ -144,9 +159,21 @@ table StartRes {
   v8_version: string;
 }
 
+table WorkerGetMessage {
+  unused: int8;
+}
+
+table WorkerGetMessageRes {
+  data: [ubyte];
+}
+
+table WorkerPostMessage {
+  // data passed thru the zero-copy data parameter.
+}
+
 table CodeFetch {
-  module_specifier: string;
-  containing_file: string;
+  specifier: string;
+  referrer: string;
 }
 
 table CodeFetchRes {
@@ -349,6 +376,7 @@ table Truncate {
 table Open {
   filename: string;
   perm: uint;
+  mode: string;
 }
 
 table OpenRes {
